@@ -22,40 +22,408 @@ Le script ajoute de base le ssh sur le port 22 ( à modifier pour plus de sécur
 
 
 
-Pourquoi l’ingénierie sociale fonctionnera toujours
-Un message arrive entre deux réunions. Il est question d’un document à consulter. Pour l’ouvrir, le destinataire doit saisir un code sur une page Microsoft. Il vérifie l’adresse, se connecte et valide sa MFA. Rien, à première vue, ne sort de l’ordinaire.
-Il vient pourtant peut-être de donner accès à son compte à un attaquant.
-C’est ce qui rend le device code phishing déroutant : plusieurs des réflexes enseignés en sensibilisation peuvent avoir été respectés, sans que l’utilisateur comprenne ce qu’il est réellement en train d’autoriser.
-On ne peut pas travailler en se méfiant de tout
-Une journée de travail repose sur quantité de petits actes de confiance. On ouvre le fichier envoyé par un collègue. On répond à un fournisseur. On suit les indications du support pour débloquer une application. Vérifier systématiquement chacune de ces interactions rendrait le travail impraticable.
-Les attaquants s’appuient sur ces habitudes. Une demande qui ressemble à la suite logique d’un dossier en cours n’attire pas la même attention qu’un message sans rapport avec notre activité. Elle arrive au bon moment, emploie les bons mots et demande un geste que l’on a déjà fait ailleurs.
-La sensibilisation a toute sa place ici. Repérer une urgence fabriquée, vérifier une demande inhabituelle, refuser une notification MFA que l’on n’a pas déclenchée : ces réflexes s’apprennent. Il faut aussi savoir à qui signaler un doute, y compris quand on a déjà cliqué.
-Mais les consignes doivent pouvoir s’appliquer dans une vraie journée de travail. Si un salarié est invité à prendre le temps de vérifier, puis rappelé à l’ordre parce que son dossier n’avance pas assez vite, il devra arbitrer. L’organisation ne peut pas lui demander de ralentir pour la sécurité tout en sanctionnant ce ralentissement.
-Même lorsque ces conditions sont réunies, il reste la fatigue, les automatismes et les sollicitations bien préparées. Une formation peut réduire les erreurs. Elle ne permet pas de construire toute la sécurité de l’entreprise sur l’espoir que personne n’en commettra.
-Une vraie page Microsoft peut faire partie du piège
-À l’origine, le device code flow répond à un besoin légitime. Ce mécanisme OAuth permet notamment de connecter un équipement sur lequel la saisie est peu pratique. L’utilisateur entre un code dans le navigateur d’un autre appareil, puis s’authentifie. L’application qui a lancé la demande peut alors récupérer un jeton d’accès, ou access token, ainsi qu’un refresh token si les permissions le permettent, afin de renouveler cet accès. 1 — Documentation OAuth
-Dans l’attaque, c’est l’attaquant qui lance la demande. Il fait ensuite parvenir le code à sa cible, par exemple dans une fausse invitation Teams. Celle-ci le saisit sur la véritable page Microsoft et termine sa connexion. Si les contrôles en place autorisent ce flux, les jetons sont délivrés au client de l’attaquant, pour les accès accordés. Microsoft a documenté ce procédé dans les campagnes de Storm-2372. 2 — Analyse de Microsoft
-Figure 1. Échanges simplifiés lors d’un device code phishing. Si les contrôles autorisent le flux, les jetons sont délivrés au client qui a lancé la demande. [1]
-L’utilisateur pense ouvrir un document. En réalité, il autorise une connexion lancée ailleurs. Sa MFA peut avoir été correctement effectuée, et le domaine qu’il a vérifié peut être le bon. Le contrôle de l’adresse reste utile ; il ne dit pas, à lui seul, à quoi servira l’authentification. 3 — Analyse de Huntress
-Avec EvilTokens, cette technique prend aussi la forme d’une offre de Phishing-as-a-Service. Huntress décrit une plateforme qui automatise une partie de l’attaque et adapte les leurres au travail de la victime : proposition commerciale, demande de signature, formulaire à remplir. Le code est généré au moment où la personne ouvre la page, ce qui facilite l’enchaînement du scénario. [3]
-La consigne « vérifiez le lien » doit donc être complétée. Lorsqu’un message demande de saisir un code de ce type, il faut pouvoir identifier l’application que l’on est en train de connecter et se rappeler si l’on a soi-même engagé cette opération. Si ce n’est pas clair, on s’arrête et on contacte le support par le canal habituel.
-Un flux inutilisé devrait être bloqué
-La question se pose aussi du côté de l’administration : le device code flow sert-il à quelque chose dans ce tenant ? Si aucun usage métier ne le justifie, le bloquer ferme cette voie d’accès.
-Microsoft a fait évoluer les Security defaults dans ce sens. Depuis le 1er juillet 2026, les nouveaux tenants Entra ID bloquent le device code flow dans ce cadre. Cela ne dispense pas de vérifier les tenants existants, ni les environnements qui reposent sur leurs propres politiques de Conditional Access. 4 — Security defaults de Microsoft Entra ID
-Avant de bloquer, il faut regarder les usages réels. Les journaux de connexion permettent de repérer où ce flux apparaît. Une politique de Conditional Access en mode Report-only aide ensuite à évaluer les conséquences d’un blocage. Microsoft recommande de restreindre le flux aussi largement que possible et de réserver les exceptions à des besoins documentés et sécurisés. 5 — Politique de blocage 6 — Suivi des flux d’authentification
-Reste à passer de Report-only à On une fois les vérifications terminées. Tant que la politique est en observation, elle ne bloque rien. [5]
-Figure 2. Démarche possible pour un tenant utilisant Conditional Access : examiner les usages, évaluer l’impact, puis activer le blocage avec les seules exceptions nécessaires. [5]
-Ces exceptions demandent un suivi dans le temps. Une exclusion accordée pour un dépannage peut survivre longtemps au problème qui l’a justifiée. Il faut savoir qui l’utilise, pour quelle application, et qui se chargera de vérifier qu’elle reste nécessaire.
-Limiter ce qu’une erreur permet de faire
-Le même raisonnement s’applique aux autres accès. Une application oubliée ou des permissions devenues inutiles peuvent donner à un attaquant davantage de possibilités que prévu. Un compte conserve parfois les droits d’un ancien poste simplement parce que personne n’a pensé à les retirer. La réduction de la surface d’attaque passe aussi par ces revues régulières.
-Les méthodes de MFA résistantes au phishing, comme les clés FIDO2 et les passkeys, renforcent la protection contre les fausses pages de connexion. Leur déploiement doit s’accompagner d’un contrôle des flux d’authentification et des permissions autorisées. [2]
-Les processus métier ont également un rôle à jouer. Une demande de changement de coordonnées bancaires justifie un appel à un numéro déjà connu, même si elle provient du compte habituel du fournisseur. Pour certaines opérations sensibles, une seconde validation évite qu’un compte compromis suffise à tout autoriser.
-La sensibilisation devient alors plus facile à appliquer : le salarié sait quand demander une vérification, et cette vérification est prévue dans le fonctionnement de l’entreprise.
-Le SOC doit pouvoir comprendre ce qui a échappé aux contrôles
-Des exceptions resteront parfois nécessaires. Le compte d’un partenaire pourra être compromis. Une demande convaincante sera validée malgré les précautions prises. L’entreprise doit pouvoir détecter ces situations et organiser la réponse. C’est le rôle du SOC, le Security Operations Center.
-Dans un scénario de device code phishing, les journaux de connexion renseignent sur le flux utilisé. Un usage inhabituel peut être rapproché de l’enregistrement d’un nouvel appareil ou d’une activité anormale dans la messagerie. Pris séparément, ces événements ne suffisent pas à conclure. Leur enchaînement et le contexte du compte permettent d’évaluer ce qui s’est passé. [6][2]
-Figure 3. Exemple de corrélation par un SOC. Les signaux présentés constituent des pistes d’analyse ; ils ne prouvent pas, à eux seuls, une compromission. [3][6]
-Un déplacement, un changement de poste ou une intervention du support peuvent expliquer une partie de ces signaux. L’analyste doit pouvoir vérifier ces hypothèses, notamment en échangeant avec l’utilisateur. Un signalement tardif peut encore aider : « J’ai saisi un code après avoir reçu une invitation » apporte un élément que les logs ne racontent pas forcément.
-Lorsque la compromission est probable, la réponse peut comprendre le blocage du compte, la révocation des refresh tokens et des sessions, puis la recherche des données consultées et des modifications effectuées. Changer uniquement le mot de passe ne suffit pas à traiter tous les accès déjà obtenus. Il faut également tenir compte de la façon dont chaque application gère ses jetons et ses sessions, car les révocations n’ont pas toutes un effet immédiat. 7 — Révocation des accès dans Entra ID
-Pour intervenir à temps, le SOC a besoin de journaux exploitables, de détections adaptées et d’une procédure qui précise les actions à engager. Il ne verra pas nécessairement tout. Il doit en revanche disposer des moyens d’enquêter et de contenir un incident lorsqu’un indice apparaît.
-L’ingénierie sociale continuera de fonctionner parce qu’elle s’insère dans des échanges dont nous avons besoin pour travailler. La sensibilisation reste indispensable, à condition de lui donner des suites concrètes dans les outils et les procédures. Le jour où quelqu’un saisira ce code entre deux réunions, l’entreprise devra pouvoir compter sur les protections et les moyens de réponse qu’elle aura préparés.
+ {
+  "title": "SOC | Investigation par entité",
+  "description": "V1 ciblée Splunk Cloud Platform 10.5.2605 / ES 8.6.1. Authentication et Endpoint CIM requis ; Network_Traffic et index risk optionnels. Recherche exacte sans résolution des alias. Validation sur instance requise.",
+  "inputs": {
+    "input_kind": {
+      "type": "input.dropdown",
+      "title": "Type d’entité",
+      "options": {
+        "token": "entity_kind",
+        "defaultValue": "user",
+        "items": [
+          {
+            "label": "Utilisateur",
+            "value": "user"
+          },
+          {
+            "label": "Machine (dest)",
+            "value": "machine"
+          },
+          {
+            "label": "IP (src / dest)",
+            "value": "ip"
+          }
+        ]
+      }
+    },
+    "input_entity": {
+      "type": "input.text",
+      "title": "Valeur exacte — compte, hostname ou IP",
+      "options": {
+        "token": "entity",
+        "defaultValue": "__RENSEIGNER__"
+      }
+    },
+    "input_time": {
+      "type": "input.timerange",
+      "title": "Période d’investigation",
+      "options": {
+        "token": "global_time",
+        "defaultValue": "-4h,now"
+      }
+    }
+  },
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {
+            "earliest": "$global_time.earliest$",
+            "latest": "$global_time.latest$"
+          }
+        }
+      }
+    }
+  },
+  "visualizations": {
+    "viz_intro": {
+      "type": "splunk.markdown",
+      "title": "",
+      "options": {
+        "markdown": "# Investigation SOC\nSaisir une valeur exacte, sélectionner la période puis **Submit**. Machine = champ CIM **dest** ; IP = **src / dest**. Les noms courts, FQDN et comptes UPN ne sont pas fusionnés. Cliquer dans les tableaux pour ouvrir leur recherche source."
+      }
+    },
+    "viz_total": {
+      "type": "splunk.singlevalue",
+      "title": "Authentifications",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_total"
+      }
+    },
+    "viz_failure": {
+      "type": "splunk.singlevalue",
+      "title": "Échecs",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_failure"
+      }
+    },
+    "viz_success": {
+      "type": "splunk.singlevalue",
+      "title": "Succès",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_success"
+      }
+    },
+    "viz_machines": {
+      "type": "splunk.singlevalue",
+      "title": "Destinations distinctes",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_machines"
+      }
+    },
+    "viz_trend": {
+      "type": "splunk.line",
+      "title": "Authentifications dans le temps",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_auth_trend"
+      },
+      "description": "Agrégation par tranches de 5 minutes ; horaires dans le fuseau Splunk de l’utilisateur."
+    },
+    "viz_auth": {
+      "type": "splunk.table",
+      "title": "Authentifications | comptes et machines",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_auth_table"
+      },
+      "description": "100 relations les plus fréquentes. Première/dernière tranche : précision de 5 minutes, pas les heures exactes des événements.",
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_process": {
+      "type": "splunk.table",
+      "title": "Endpoint | processus et commandes",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_process"
+      },
+      "description": "100 groupes les plus récents. Le champ process contient la commande lorsqu’elle est mappée par la source. Vue IP : uniquement si dest contient cette IP.",
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_network": {
+      "type": "splunk.table",
+      "title": "Réseau | communications",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_network"
+      },
+      "description": "Optionnel : modèle Network_Traffic requis. Machine : dest uniquement ; aucune attribution automatique hostname ↔ IP.",
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_risk": {
+      "type": "splunk.table",
+      "title": "ES | événements de risque",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_risk"
+      },
+      "description": "Optionnel : index risk et permissions requis. Événements de risque, pas une liste exhaustive des findings ni leur statut.",
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_notes": {
+      "type": "splunk.markdown",
+      "title": "",
+      "options": {
+        "markdown": "**Lecture des résultats** : un panneau vide ne prouve pas une absence d’activité. Vérifier mapping CIM, permissions et source de données. Les tables sont plafonnées à 100 groupes ; ouvrir la recherche pour approfondir. Les recherches tstats utilisent summariesonly=false pour ne pas se limiter aux résumés accélérés. Commencer avec une période courte."
+      }
+    }
+  },
+  "dataSources": {
+    "ds_auth": {
+      "type": "ds.search",
+      "name": "Authentifications CIM — tranches de 5 minutes",
+      "options": {
+        "query": "| tstats summariesonly=false fillnull_value=\"(non renseigné)\" count AS events FROM datamodel=Authentication.Authentication WHERE (Authentication.user=$entity|s$ OR Authentication.src=$entity|s$ OR Authentication.dest=$entity|s$) BY _time span=5m Authentication.user Authentication.src Authentication.dest Authentication.action Authentication.app\n| rename Authentication.* AS *\n| where ($entity_kind|s$=\"user\" AND lower(user)=lower($entity|s$)) OR ($entity_kind|s$=\"machine\" AND lower(dest)=lower($entity|s$)) OR ($entity_kind|s$=\"ip\" AND (src=$entity|s$ OR dest=$entity|s$))"
+      }
+    },
+    "ds_total": {
+      "type": "ds.chain",
+      "name": "total",
+      "options": {
+        "query": "| stats sum(events) AS valeur | fillnull value=0 valeur",
+        "extend": "ds_auth"
+      }
+    },
+    "ds_failure": {
+      "type": "ds.chain",
+      "name": "failure",
+      "options": {
+        "query": "| where action=\"failure\" | stats sum(events) AS valeur | fillnull value=0 valeur",
+        "extend": "ds_auth"
+      }
+    },
+    "ds_success": {
+      "type": "ds.chain",
+      "name": "success",
+      "options": {
+        "query": "| where action=\"success\" | stats sum(events) AS valeur | fillnull value=0 valeur",
+        "extend": "ds_auth"
+      }
+    },
+    "ds_machines": {
+      "type": "ds.chain",
+      "name": "machines",
+      "options": {
+        "query": "| where dest!=\"(non renseigné)\" | stats dc(dest) AS valeur",
+        "extend": "ds_auth"
+      }
+    },
+    "ds_auth_trend": {
+      "type": "ds.chain",
+      "name": "Activité par résultat",
+      "options": {
+        "query": "| timechart span=5m sum(events) AS événements BY action",
+        "extend": "ds_auth"
+      }
+    },
+    "ds_auth_table": {
+      "type": "ds.chain",
+      "name": "Relations d’authentification",
+      "options": {
+        "query": "| stats sum(events) AS événements min(_time) AS première_tranche max(_time) AS dernière_tranche BY user src dest action app | sort 100 - événements | convert ctime(première_tranche) ctime(dernière_tranche)",
+        "extend": "ds_auth"
+      }
+    },
+    "ds_process": {
+      "type": "ds.search",
+      "name": "Processus CIM — 100 groupes les plus récents",
+      "options": {
+        "query": "| tstats summariesonly=false fillnull_value=\"(non renseigné)\" count AS événements min(_time) AS première_observation max(_time) AS dernière_observation FROM datamodel=Endpoint.Processes WHERE (Processes.user=$entity|s$ OR Processes.dest=$entity|s$) BY Processes.user Processes.dest Processes.process_name Processes.parent_process_name Processes.process\n| rename Processes.* AS *\n| where ($entity_kind|s$=\"user\" AND lower(user)=lower($entity|s$)) OR ($entity_kind|s$=\"machine\" AND lower(dest)=lower($entity|s$)) OR ($entity_kind|s$=\"ip\" AND (dest=$entity|s$ OR dest=$entity|s$))\n| sort 100 - dernière_observation\n| convert ctime(première_observation) ctime(dernière_observation)\n| table première_observation dernière_observation user dest process_name parent_process_name process événements"
+      }
+    },
+    "ds_network": {
+      "type": "ds.search",
+      "name": "Réseau CIM — 100 relations les plus fréquentes",
+      "options": {
+        "query": "| tstats summariesonly=false fillnull_value=\"(non renseigné)\" count AS événements FROM datamodel=Network_Traffic.All_Traffic WHERE (All_Traffic.user=$entity|s$ OR All_Traffic.src=$entity|s$ OR All_Traffic.dest=$entity|s$) BY All_Traffic.user All_Traffic.src All_Traffic.dest All_Traffic.dest_port All_Traffic.transport All_Traffic.action\n| rename All_Traffic.* AS *\n| where ($entity_kind|s$=\"user\" AND lower(user)=lower($entity|s$)) OR ($entity_kind|s$=\"machine\" AND lower(dest)=lower($entity|s$)) OR ($entity_kind|s$=\"ip\" AND (src=$entity|s$ OR dest=$entity|s$))\n| sort 100 - événements\n| table user src dest dest_port transport action événements"
+      }
+    },
+    "ds_risk": {
+      "type": "ds.search",
+      "name": "Événements de risque ES — index risk, 100 derniers",
+      "options": {
+        "query": "index=risk (risk_object=$entity|s$ OR user=$entity|s$ OR src=$entity|s$ OR dest=$entity|s$)\n| where ($entity_kind|s$=\"user\" AND (lower(user)=lower($entity|s$) OR (risk_object_type=\"user\" AND lower(risk_object)=lower($entity|s$)))) OR ($entity_kind|s$=\"machine\" AND (lower(dest)=lower($entity|s$) OR (risk_object_type=\"system\" AND lower(risk_object)=lower($entity|s$)))) OR ($entity_kind|s$=\"ip\" AND (src=$entity|s$ OR dest=$entity|s$ OR risk_object=$entity|s$))\n| sort 100 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure risk_object risk_object_type risk_score source risk_message user src dest"
+      }
+    }
+  },
+  "layout": {
+    "tabs": {
+      "items": [
+        {
+          "layoutId": "layout_investigation",
+          "label": "Investigation"
+        }
+      ]
+    },
+    "layoutDefinitions": {
+      "layout_investigation": {
+        "type": "absolute",
+        "options": {
+          "width": 1440,
+          "height": 1960,
+          "display": "auto-scale"
+        },
+        "structure": [
+          {
+            "item": "viz_intro",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 15,
+              "w": 1400,
+              "h": 125
+            }
+          },
+          {
+            "item": "viz_total",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 155,
+              "w": 335,
+              "h": 130
+            }
+          },
+          {
+            "item": "viz_failure",
+            "type": "block",
+            "position": {
+              "x": 375,
+              "y": 155,
+              "w": 335,
+              "h": 130
+            }
+          },
+          {
+            "item": "viz_success",
+            "type": "block",
+            "position": {
+              "x": 730,
+              "y": 155,
+              "w": 335,
+              "h": 130
+            }
+          },
+          {
+            "item": "viz_machines",
+            "type": "block",
+            "position": {
+              "x": 1085,
+              "y": 155,
+              "w": 335,
+              "h": 130
+            }
+          },
+          {
+            "item": "viz_trend",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 305,
+              "w": 1400,
+              "h": 265
+            }
+          },
+          {
+            "item": "viz_auth",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 590,
+              "w": 1400,
+              "h": 300
+            }
+          },
+          {
+            "item": "viz_process",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 910,
+              "w": 1400,
+              "h": 330
+            }
+          },
+          {
+            "item": "viz_network",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 1260,
+              "w": 1400,
+              "h": 280
+            }
+          },
+          {
+            "item": "viz_risk",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 1560,
+              "w": 1400,
+              "h": 255
+            }
+          },
+          {
+            "item": "viz_notes",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 1835,
+              "w": 1400,
+              "h": 105
+            }
+          }
+        ]
+      }
+    },
+    "globalInputs": [
+      "input_kind",
+      "input_entity",
+      "input_time"
+    ],
+    "options": {
+      "submitButton": true,
+      "submitOnDashboardLoad": false
+    }
+  }
+}
+ 
