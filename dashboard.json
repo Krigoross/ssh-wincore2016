@@ -1,6 +1,6 @@
 {
   "title": "SOC | Investigation par entité",
-  "description": "V5.1 — correction des conversions temporelles du résolveur de drilldown. Tokens de période stockés dans des champs avant conversion ; valeurs multiples normalisées. Validation sur instance requise.",
+  "description": "V7 — drilldown conservé ; reconnaissance de champs, récupération de processus sans GUID par machine/PID/commande, sélection des candidats et extension parent/enfants/réseau. Sessions/domaines : diagnostic uniquement. Validation sur instance requise.",
   "inputs": {
     "input_kind": {
       "type": "input.dropdown",
@@ -62,6 +62,18 @@
         },
         "selected_latest": {
           "value": "1"
+        },
+        "candidate_machine": {
+          "value": ""
+        },
+        "candidate_guid": {
+          "value": ""
+        },
+        "candidate_parent": {
+          "value": ""
+        },
+        "candidate_finding": {
+          "value": ""
         }
       }
     }
@@ -226,6 +238,22 @@
               {
                 "token": "selected_latest",
                 "key": "row._latest.value"
+              },
+              {
+                "token": "candidate_machine",
+                "value": ""
+              },
+              {
+                "token": "candidate_guid",
+                "value": ""
+              },
+              {
+                "token": "candidate_parent",
+                "value": ""
+              },
+              {
+                "token": "candidate_finding",
+                "value": ""
               }
             ]
           }
@@ -255,7 +283,7 @@
     "viz_findings_notes": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "**Recherche associée** : récupération dans le finding ou le référentiel de détections ES, sélection de la première recherche, puis expansion des paramètres avec expandtoken. La période provient du drilldown, sinon de la détection, sinon de la période sélectionnée (repli signalé). Les directives temporelles présentes dans le SPL peuvent primer. Absence de drilldown ou paramètres non résolus : message explicite. Le lookup correlationsearches_lookup, expandtoken et les macros du SPL doivent être accessibles dans l’application du dashboard. En cas d’erreur de visibilité, créer ce dashboard dans Enterprise Security. Les résultats recalculés peuvent différer des événements initialement disponibles."
+        "markdown": "**V7 — adaptation par champs disponibles** : GUID + machine → extension directe ; sans GUID, machine + PID ou commande → candidats endpoint à sélectionner. PID numériques et hexadécimaux normalisés. Les champs machine/PID/commande multivalués ne sont pas utilisés pour inférer des couples incertains. Les alias CIM et quelques noms Windows courants sont reconnus. Si aucun candidat ne fournit de GUID, la parenté reste indisponible ; aucun rapprochement par nom seul. Session, domaine et utilisateur sont signalés dans le diagnostic, sans extension dédiée dans cette version. 30 points de départ, 100 candidats ; fenêtre de la détection +1 h avant /30 min après. Sources CIM et permissions nécessaires."
       }
     },
     "viz_selection": {
@@ -266,6 +294,112 @@
         "primary": "ds_drilldown_resolver"
       },
       "options": {}
+    },
+    "viz_process_anchors": {
+      "type": "splunk.table",
+      "title": "Points de départ de l’extension | GUID directs et candidat sélectionné",
+      "description": "Les GUID du drilldown sont utilisés directement. Un candidat sélectionné complète ces points de départ. Changer de finding efface cette sélection.",
+      "options": {
+        "showInternalFields": true
+      },
+      "dataSources": {
+        "primary": "ds_process_anchors"
+      }
+    },
+    "viz_extension_process": {
+      "type": "splunk.table",
+      "title": "Contexte étendu | parents et enfants directs",
+      "description": "Liens machine + GUID. Période du drilldown élargie de 1 h avant et 30 min après. 200 événements les plus anciens ; parents plus anciens hors fenêtre possibles.",
+      "options": {
+        "showInternalFields": true
+      },
+      "dataSources": {
+        "primary": "ds_extension_process"
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_extension_network": {
+      "type": "splunk.table",
+      "title": "Contexte étendu | réseau des mêmes processus",
+      "description": "Correspondance exacte sur process_guid. Dépend de la présence de ce champ dans les événements réseau ; 200 événements les plus anciens.",
+      "options": {
+        "showInternalFields": true
+      },
+      "dataSources": {
+        "primary": "ds_extension_network"
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_extension_status": {
+      "type": "splunk.table",
+      "title": "État de l’extension",
+      "description": "",
+      "options": {
+        "showInternalFields": true
+      },
+      "dataSources": {
+        "primary": "ds_extension_status"
+      }
+    },
+    "viz_adaptive_profile": {
+      "type": "splunk.table",
+      "title": "Extensions possibles à partir du drilldown",
+      "dataSources": {
+        "primary": "ds_adaptive_profile"
+      },
+      "options": {}
+    },
+    "viz_process_candidates": {
+      "type": "splunk.table",
+      "title": "Processus candidats | sélectionner une instance pour afficher sa parenté",
+      "description": "Correspondance exacte machine + PID ou commande ; première/dernière observation dans les logs, pas une garantie d’heure de création. Plusieurs candidats peuvent exister. Aucune sélection automatique.",
+      "options": {
+        "showInternalFields": false
+      },
+      "dataSources": {
+        "primary": "ds_process_candidates"
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "candidate_machine",
+                "key": "row.dest.value"
+              },
+              {
+                "token": "candidate_guid",
+                "key": "row._pick_guid.value"
+              },
+              {
+                "token": "candidate_parent",
+                "key": "row._pick_parent.value"
+              },
+              {
+                "token": "candidate_finding",
+                "key": "row._pick_finding.value"
+              }
+            ]
+          }
+        }
+      ]
     }
   },
   "dataSources": {
@@ -372,6 +506,164 @@
         "queryParameters": {
           "earliest": "$selected_earliest$",
           "latest": "$selected_latest$"
+        }
+      }
+    },
+    "ds_process_anchors": {
+      "type": "ds.chain",
+      "name": "ProcessAnchors",
+      "options": {
+        "extend": "ds_adaptive_fields",
+        "query": "| eval machine=anchor_machine, seed_guid=anchor_guid, parent_guid=anchor_parent\n| where isnotnull(machine) AND (isnotnull(seed_guid) OR isnotnull(parent_guid))\n| fields machine seed_guid parent_guid\n| append [| makeresults | eval machine=$candidate_machine|s$, seed_guid=$candidate_guid|s$, parent_guid=$candidate_parent|s$, from_finding=$candidate_finding|s$ | where from_finding=$selected_finding|s$ AND machine!=\"\" AND seed_guid!=\"\" | eval parent_guid=if(parent_guid=\"\",null(),parent_guid) | fields machine seed_guid parent_guid]\n| stats values(seed_guid) AS seed_guid values(parent_guid) AS parent_guid BY machine\n| sort 30 machine\n| eval statut=\"GUID du drilldown ou candidat sélectionné\", debut_base=$DrilldownResolver:result.periode_debut$, fin_base=$DrilldownResolver:result.periode_fin$\n| eval extension_debut=max(0,debut_base-3600), extension_fin=fin_base+1800\n| table machine seed_guid parent_guid statut extension_debut extension_fin",
+        "enableSmartSources": true
+      }
+    },
+    "ds_clause_parent": {
+      "type": "ds.chain",
+      "name": "ParentClause",
+      "options": {
+        "extend": "ds_process_anchors",
+        "query": "| where isnotnull(parent_guid) AND mvcount(parent_guid)>0\n| eval process_guid=parent_guid\n| rename machine AS dest\n| fields dest process_guid\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "enableSmartSources": true
+      }
+    },
+    "ds_clause_seed": {
+      "type": "ds.chain",
+      "name": "SeedClause",
+      "options": {
+        "extend": "ds_process_anchors",
+        "query": "| where isnotnull(seed_guid) AND mvcount(seed_guid)>0\n| eval process_guid=seed_guid\n| rename machine AS dest\n| fields dest process_guid\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "enableSmartSources": true
+      }
+    },
+    "ds_clause_child": {
+      "type": "ds.chain",
+      "name": "ChildClause",
+      "options": {
+        "extend": "ds_process_anchors",
+        "query": "| where isnotnull(seed_guid) AND mvcount(seed_guid)>0\n| eval parent_process_guid=seed_guid\n| rename machine AS dest\n| fields dest parent_process_guid\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "enableSmartSources": true
+      }
+    },
+    "ds_clause_network": {
+      "type": "ds.chain",
+      "name": "NetworkClause",
+      "options": {
+        "extend": "ds_process_anchors",
+        "query": "| where isnotnull(seed_guid) AND mvcount(seed_guid)>0\n| eval process_guid=seed_guid\n| fields process_guid\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "enableSmartSources": true
+      }
+    },
+    "ds_extension_plan": {
+      "type": "ds.chain",
+      "name": "ExtensionPlan",
+      "options": {
+        "extend": "ds_process_anchors",
+        "query": "| stats count AS machines values(seed_guid) AS processus min(extension_debut) AS extension_debut max(extension_fin) AS extension_fin\n| eval clause_parent=$ParentClause:result.search|s$, clause_seed=$SeedClause:result.search|s$, clause_child=$ChildClause:result.search|s$, clause_network=$NetworkClause:result.search|s$\n| eval clause_process=\"(\".clause_parent.\" OR \".clause_seed.\" OR \".clause_child.\")\"\n| eval statut=if(machines>0,\"Extension par GUID disponible\",\"Pas de GUID utilisable : sélectionner un candidat ou vérifier le diagnostic\"), extension_debut=coalesce(extension_debut,0), extension_fin=coalesce(extension_fin,1)\n| table statut machines processus extension_debut extension_fin clause_parent clause_seed clause_child clause_process clause_network",
+        "enableSmartSources": true
+      }
+    },
+    "ds_extension_process": {
+      "type": "ds.search",
+      "name": "Processus parents et enfants",
+      "options": {
+        "query": "index=* NOT index=notable NOT index=risk tag=process tag=report $ExtensionPlan:result.clause_process|n$\n| eval relation=case($ExtensionPlan:result.clause_seed|n$,\"Processus du drilldown\",$ExtensionPlan:result.clause_parent|n$,\"Parent\",$ExtensionPlan:result.clause_child|n$,\"Enfant direct\",true(),\"Relation non classée\")\n| sort 200 + _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table relation heure dest user process_name process parent_process_name process_guid parent_process_guid process_id parent_process_id sourcetype _raw",
+        "queryParameters": {
+          "earliest": "$ExtensionPlan:result.extension_debut$",
+          "latest": "$ExtensionPlan:result.extension_fin$"
+        }
+      }
+    },
+    "ds_extension_network": {
+      "type": "ds.search",
+      "name": "Réseau des processus du drilldown",
+      "options": {
+        "query": "index=* NOT index=notable NOT index=risk tag=network tag=communicate $ExtensionPlan:result.clause_network|n$\n| sort 200 + _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure process_guid user src src_port dest dest_port transport action bytes_in bytes_out sourcetype _raw",
+        "queryParameters": {
+          "earliest": "$ExtensionPlan:result.extension_debut$",
+          "latest": "$ExtensionPlan:result.extension_fin$"
+        }
+      }
+    },
+    "ds_extension_status": {
+      "type": "ds.chain",
+      "name": "État affiché de l’extension",
+      "options": {
+        "extend": "ds_extension_plan",
+        "query": "| eval debut=strftime(extension_debut,\"%Y-%m-%d %H:%M:%S %Z\"), fin=strftime(extension_fin,\"%Y-%m-%d %H:%M:%S %Z\") | table statut machines processus debut fin"
+      }
+    },
+    "ds_adaptive_fields": {
+      "type": "ds.chain",
+      "name": "AdaptiveFields",
+      "options": {
+        "extend": "ds_selected_events",
+        "query": "| eval anchor_machine=coalesce(dest,'Processes.dest',dvc,Computer,ComputerName), anchor_guid=coalesce(process_guid,'Processes.process_guid',ProcessGuid), anchor_parent=coalesce(parent_process_guid,'Processes.parent_process_guid',ParentProcessGuid), anchor_pid=coalesce(process_id,'Processes.process_id',ProcessId,ProcessID,NewProcessId), anchor_command=coalesce(process,'Processes.process',process_command_line,CommandLine), anchor_user=coalesce(user,'Processes.user',TargetUserName), anchor_domain=coalesce(query,domain,dest_domain), anchor_session=coalesce(session_id,LogonId,TargetLogonId)\n| eval anchor_machine=if(mvcount(anchor_machine)=1,lower(trim(tostring(mvindex(anchor_machine,0)))),null()), anchor_pid=if(mvcount(anchor_pid)=1,trim(tostring(mvindex(anchor_pid,0))),null()), anchor_command=if(mvcount(anchor_command)=1,trim(tostring(mvindex(anchor_command,0))),null())\n| eval anchor_pid_hex=if(match(anchor_pid,\"^0[xX][0-9a-fA-F]+$\"),substr(anchor_pid,3),null())\n| eval anchor_pid_number=coalesce(tonumber(anchor_pid_hex,16),tonumber(anchor_pid))\n| eval anchor_pid=coalesce(tostring(anchor_pid_number),anchor_pid), anchor_guid=mvmap(anchor_guid,lower(trim(tostring(anchor_guid)))), anchor_parent=mvmap(anchor_parent,lower(trim(tostring(anchor_parent))))\n| eval anchor_guid=mvfilter(isnotnull(anchor_guid) AND anchor_guid!=\"\" AND anchor_guid!=\"unknown\" AND anchor_guid!=\"-\"), anchor_parent=mvfilter(isnotnull(anchor_parent) AND anchor_parent!=\"\" AND anchor_parent!=\"unknown\" AND anchor_parent!=\"-\")\n| eval anchor_machine=if(anchor_machine=\"\" OR anchor_machine=\"unknown\" OR anchor_machine=\"-\",null(),anchor_machine), anchor_pid=if(anchor_pid=\"\" OR anchor_pid=\"unknown\" OR anchor_pid=\"-\",null(),anchor_pid), anchor_command=if(anchor_command=\"\" OR anchor_command=\"unknown\" OR anchor_command=\"-\",null(),anchor_command)\n| eval resolution=case(isnotnull(anchor_machine) AND isnotnull(anchor_guid),\"GUID disponible\",isnotnull(anchor_machine) AND isnotnull(anchor_pid),\"Candidats par machine + PID\",isnotnull(anchor_machine) AND isnotnull(anchor_command),\"Candidats par machine + commande\",true(),\"Pas d’identification précise de processus\")\n| table anchor_machine anchor_guid anchor_parent anchor_pid anchor_command anchor_user anchor_domain anchor_session resolution",
+        "enableSmartSources": true
+      }
+    },
+    "ds_adaptive_profile": {
+      "type": "ds.chain",
+      "name": "Profils reconnus",
+      "options": {
+        "extend": "ds_adaptive_fields",
+        "query": "| stats count AS lignes count(eval(isnotnull(anchor_machine) AND isnotnull(anchor_guid))) AS avec_GUID count(eval(isnotnull(anchor_machine) AND isnotnull(anchor_pid))) AS avec_PID count(eval(isnotnull(anchor_machine) AND isnotnull(anchor_command))) AS avec_commande count(eval(isnotnull(anchor_session))) AS avec_session count(eval(isnotnull(anchor_domain))) AS avec_domaine count(eval(isnotnull(anchor_user))) AS avec_utilisateur\n| eval extension_processus=case(avec_GUID>0,\"GUID disponibles : parenté directe possible\",avec_PID>0 OR avec_commande>0,\"Recherche de candidats dans les logs endpoint\",true(),\"Informations de processus insuffisantes\"), autres_indices=mvjoin(mvappend(if(avec_session>0,\"Session présente\",null()),if(avec_domaine>0,\"Domaine présent\",null()),if(avec_utilisateur>0,\"Utilisateur présent\",null())),\" ; \")\n| table lignes extension_processus avec_GUID avec_PID avec_commande autres_indices",
+        "enableSmartSources": true
+      }
+    },
+    "ds_fallback_anchors": {
+      "type": "ds.chain",
+      "name": "FallbackAnchors",
+      "options": {
+        "extend": "ds_adaptive_fields",
+        "query": "| where isnull(anchor_guid) AND isnotnull(anchor_machine) AND (isnotnull(anchor_pid) OR isnotnull(anchor_command))\n| dedup anchor_machine anchor_pid anchor_command\n| head 30\n| eval debut_base=$DrilldownResolver:result.periode_debut$, fin_base=$DrilldownResolver:result.periode_fin$, candidate_debut=max(0,debut_base-3600), candidate_fin=fin_base+1800\n| table anchor_machine anchor_pid anchor_command candidate_debut candidate_fin",
+        "enableSmartSources": true
+      }
+    },
+    "ds_candidate_hosts": {
+      "type": "ds.chain",
+      "name": "CandidateHosts",
+      "options": {
+        "extend": "ds_fallback_anchors",
+        "query": "| stats values(anchor_machine) AS anchor_machine\n| mvexpand anchor_machine\n| eval _host_field=split(\"dest,dvc,Computer,ComputerName\",\",\")\n| mvexpand _host_field\n| eval {_host_field}=anchor_machine\n| fields dest dvc Computer ComputerName\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "enableSmartSources": true
+      }
+    },
+    "ds_candidate_pid_clause": {
+      "type": "ds.chain",
+      "name": "CandidatePID",
+      "options": {
+        "extend": "ds_fallback_anchors",
+        "query": "| where isnotnull(anchor_pid)\n| eval dest=anchor_machine, process_id=anchor_pid\n| fields dest process_id\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "enableSmartSources": true
+      }
+    },
+    "ds_candidate_command_clause": {
+      "type": "ds.chain",
+      "name": "CandidateCommand",
+      "options": {
+        "extend": "ds_fallback_anchors",
+        "query": "| where isnotnull(anchor_command)\n| eval dest=anchor_machine, process=anchor_command\n| fields dest process\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "enableSmartSources": true
+      }
+    },
+    "ds_candidate_plan": {
+      "type": "ds.chain",
+      "name": "CandidatePlan",
+      "options": {
+        "extend": "ds_fallback_anchors",
+        "query": "| stats count AS points min(candidate_debut) AS candidate_debut max(candidate_fin) AS candidate_fin\n| eval host_clause=$CandidateHosts:result.search|s$, pid_clause=$CandidatePID:result.search|s$, command_clause=$CandidateCommand:result.search|s$\n| eval candidate_clause=\"(\".pid_clause.\" OR \".command_clause.\")\", candidate_debut=coalesce(candidate_debut,0), candidate_fin=coalesce(candidate_fin,1)\n| table points host_clause pid_clause command_clause candidate_clause candidate_debut candidate_fin",
+        "enableSmartSources": true
+      }
+    },
+    "ds_process_candidates": {
+      "type": "ds.search",
+      "name": "Processus candidats sans GUID initial",
+      "options": {
+        "query": "index=* NOT index=notable NOT index=risk tag=process tag=report $CandidatePlan:result.host_clause|n$\n| eval dest=lower(trim(tostring(mvindex(coalesce(dest,dvc,Computer,ComputerName),0)))), process_guid=lower(trim(tostring(mvindex(coalesce(process_guid,ProcessGuid),0)))), parent_process_guid=lower(trim(tostring(mvindex(coalesce(parent_process_guid,ParentProcessGuid),0)))), process_id=trim(tostring(mvindex(coalesce(process_id,ProcessId,ProcessID,NewProcessId),0))), process=trim(tostring(mvindex(coalesce(process,process_command_line,CommandLine),0)))\n| eval pid_hex=if(match(process_id,\"^0[xX][0-9a-fA-F]+$\"),substr(process_id,3),null())\n| eval pid_number=coalesce(tonumber(pid_hex,16),tonumber(process_id))\n| eval process_id=coalesce(tostring(pid_number),process_id)\n| where $CandidatePlan:result.candidate_clause|n$\n| eval correspondance=case(($CandidatePlan:result.pid_clause|n$) AND ($CandidatePlan:result.command_clause|n$),\"Machine + PID et commande présents\",$CandidatePlan:result.command_clause|n$,\"Machine + commande exacte\",true(),\"Machine + PID : vérifier la période et la commande\")\n| eval process_guid=if(isnull(process_guid) OR process_guid=\"\" OR process_guid=\"unknown\" OR process_guid=\"-\",\"(GUID absent)\",process_guid), parent_process_guid=coalesce(parent_process_guid,\"\"), process_id=coalesce(process_id,\"\"), process=coalesce(process,\"\"), process_name=coalesce(process_name,\"\"), parent_process_name=coalesce(parent_process_name,\"\")\n| stats min(_time) AS premiere_observation max(_time) AS derniere_observation values(user) AS user values(sourcetype) AS sourcetype BY dest process_guid parent_process_guid process_id process process_name parent_process_name correspondance\n| sort 100 + premiere_observation\n| eval heure_premiere=strftime(premiere_observation,\"%Y-%m-%d %H:%M:%S %Z\"), heure_derniere=strftime(derniere_observation,\"%Y-%m-%d %H:%M:%S %Z\"), selection=if(process_guid=\"(GUID absent)\",\"GUID non récupéré : parenté indisponible\",\"Cliquer pour étendre ce candidat\"), _pick_guid=if(process_guid=\"(GUID absent)\",\"\",process_guid), _pick_parent=parent_process_guid, _pick_finding=$selected_finding|s$\n| table selection correspondance heure_premiere heure_derniere dest user process_id process_name process parent_process_name process_guid parent_process_guid sourcetype _pick_guid _pick_parent _pick_finding",
+        "queryParameters": {
+          "earliest": "$CandidatePlan:result.candidate_debut$",
+          "latest": "$CandidatePlan:result.candidate_fin$"
         }
       }
     }
@@ -514,7 +806,7 @@
         "type": "absolute",
         "options": {
           "width": 1440,
-          "height": 1510,
+          "height": 3080,
           "display": "auto-scale"
         },
         "structure": [
@@ -553,9 +845,9 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 1255,
+              "y": 2815,
               "w": 1400,
-              "h": 230
+              "h": 240
             }
           },
           {
@@ -566,6 +858,66 @@
               "y": 565,
               "w": 1400,
               "h": 220
+            }
+          },
+          {
+            "item": "viz_process_anchors",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 1785,
+              "w": 1400,
+              "h": 180
+            }
+          },
+          {
+            "item": "viz_extension_process",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 1985,
+              "w": 1400,
+              "h": 330
+            }
+          },
+          {
+            "item": "viz_extension_network",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 2335,
+              "w": 1400,
+              "h": 300
+            }
+          },
+          {
+            "item": "viz_extension_status",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 2655,
+              "w": 1400,
+              "h": 140
+            }
+          },
+          {
+            "item": "viz_adaptive_profile",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 1255,
+              "w": 1400,
+              "h": 160
+            }
+          },
+          {
+            "item": "viz_process_candidates",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 1435,
+              "w": 1400,
+              "h": 330
             }
           }
         ]
