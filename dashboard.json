@@ -1,6 +1,6 @@
 {
   "title": "SOC | Investigation par entité",
-  "description": "V2 ciblée Splunk Cloud Platform 10.5.2605 / ES 8.6.1 : findings indexés dans notable et événements de contexte au clic, plus investigation CIM manuelle. Validation sur instance requise.",
+  "description": "V3 — Splunk Cloud 10.5.2605 / ES 8.6.1. Findings filtrés sur l’entité et la période, confirmation visible du clic, événements de contexte sur les index autorisés. Tests sur instance requis.",
   "inputs": {
     "input_kind": {
       "type": "input.dropdown",
@@ -49,6 +49,19 @@
             "earliest": "$global_time.earliest$",
             "latest": "$global_time.latest$"
           }
+        }
+      }
+    },
+    "tokens": {
+      "default": {
+        "selected_finding": {
+          "value": "Aucun finding sélectionné"
+        },
+        "selected_earliest": {
+          "value": "0"
+        },
+        "selected_latest": {
+          "value": "1"
         }
       }
     }
@@ -184,13 +197,13 @@
     "viz_finding_intro": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Findings récents → événements de contexte\nCliquer **Submit** une première fois pour charger la liste, puis cliquer sur une ligne. Les événements associés à la première entité détectée s’affichent en dessous, sur **±30 min autour de _time du finding**. Les filtres manuels du haut concernent l’onglet Investigation ; cette liste couvre toujours les dernières 24 h. Aucun résultat ne signifie pas absence d’activité."
+        "markdown": "# Findings de l’entité recherchée\nChoisir le type, saisir la valeur exacte, sélectionner la période puis **Submit**. La liste ci-dessous est filtrée sur cette entité. En **mode consultation**, cliquer sur une cellule : le panneau « Finding sélectionné » doit changer, puis les événements se chargent dessous. Un panneau vide peut indiquer une absence de logs, un problème de mapping ou de permissions."
       }
     },
     "viz_findings": {
       "type": "splunk.table",
-      "title": "100 enregistrements récents de notable | cliquer pour investiguer",
-      "description": "Liste issue de l’index notable : pas une copie de la file Mission Control. Les groupes KV Store et les statuts ne sont pas récupérés.",
+      "title": "Findings de $entity$ | cliquer sur une cellule",
+      "description": "100 enregistrements les plus récents après filtrage par entité et période. La fenêtre de contexte est centrée sur _time du finding.",
       "options": {
         "showInternalFields": false
       },
@@ -203,12 +216,8 @@
           "options": {
             "tokens": [
               {
-                "token": "selected_entity",
-                "key": "row._entity.value"
-              },
-              {
-                "token": "selected_kind",
-                "key": "row._kind.value"
+                "token": "selected_finding",
+                "key": "row.finding_id.value"
               },
               {
                 "token": "selected_earliest",
@@ -217,10 +226,6 @@
               {
                 "token": "selected_latest",
                 "key": "row._latest.value"
-              },
-              {
-                "token": "selected_finding",
-                "key": "row.finding_id.value"
               }
             ]
           }
@@ -229,8 +234,8 @@
     },
     "viz_selected_events": {
       "type": "splunk.table",
-      "title": "Contexte du finding $selected_finding$ | $selected_entity$",
-      "description": "200 événements les plus récents, tags CIM Authentication / Processes / Network. Même entité et proximité temporelle ; lien causal avec la détection non établi. _raw donne le contenu original.",
+      "title": "Événements de contexte | $entity$",
+      "description": "200 événements les plus récents : même entité, ±30 minutes autour du finding. Correspondance temporelle, pas preuve du déclenchement.",
       "options": {},
       "dataSources": {
         "primary": "ds_selected_events"
@@ -248,7 +253,15 @@
     "viz_findings_notes": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "**Périmètre** : recherche sur les index par défaut autorisés du compte analyste et champs CIM user/src/dest. Priorité de sélection : user → dest → src → risk_object ; si plusieurs valeurs existent, seule la première est choisie. Aucune résolution hostname/IP ou alias de compte. _time du finding peut différer de l’heure des faits : adapter la fenêtre à la détection. Pour les preuves exactes, utiliser le drilldown configuré de la règle dans ES. Si notable est verrouillé par RBAC lockdown, conserver l’accès via Mission Control."
+        "markdown": "**Périmètre** : correspondance exacte sur les champs user, dest/dvc, src et risk_object selon le type sélectionné ; valeurs multiples prises en compte. Aucune fusion de comptes ou attribution historique hostname/IP. Liste issue de notable, sans groupes KV Store ni statuts de Mission Control. Le contexte porte sur les index autorisés, les tags CIM Authentication / Processes / Network et ±30 min autour de _time du finding. Pour les événements exacts déclencheurs, utiliser le drilldown de la détection. Après changement d’entité, sélectionner de nouveau un finding."
+      }
+    },
+    "viz_selection": {
+      "type": "splunk.table",
+      "title": "Finding sélectionné | confirmation du clic",
+      "options": {},
+      "dataSources": {
+        "primary": "ds_selection"
       }
     }
   },
@@ -331,13 +344,9 @@
     },
     "ds_recent_findings": {
       "type": "ds.search",
-      "name": "Enregistrements récents de notable — dernières 24 h",
+      "name": "Findings de l’entité saisie — période sélectionnée",
       "options": {
-        "queryParameters": {
-          "earliest": "-24h",
-          "latest": "now"
-        },
-        "query": "index=notable\n| sort 100 - _time\n| eval finding_id=coalesce(event_id,notable_event_id,\"(non renseigné)\"), détection=coalesce(rule_title,rule_name,search_name,source,\"(non renseignée)\")\n| eval _user=mvindex(user,0), _dest=mvindex(dest,0), _src=mvindex(src,0), _risk=mvindex(risk_object,0)\n| eval _kind=case(isnotnull(_user) AND _user!=\"\" AND _user!=\"unknown\",\"user\",isnotnull(_dest) AND _dest!=\"\" AND _dest!=\"unknown\",\"machine\",isnotnull(_src) AND _src!=\"\" AND _src!=\"unknown\",\"ip\",risk_object_type=\"user\" AND isnotnull(_risk),\"user\",risk_object_type=\"system\" AND isnotnull(_risk),\"machine\",true(),\"indisponible\")\n| eval _entity=case(_kind=\"user\",coalesce(_user,_risk),_kind=\"machine\",coalesce(_dest,_risk),_kind=\"ip\",_src,true(),\"__AUCUNE_ENTITE__\")\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\"), entité=_entity, type_entité=_kind, _earliest=_time-1800, _latest=_time+1800\n| table heure détection severity finding_id entité type_entité user src dest risk_object _entity _kind _earliest _latest"
+        "query": "index=notable (user=$entity|s$ OR src=$entity|s$ OR dest=$entity|s$ OR dvc=$entity|s$ OR risk_object=$entity|s$)\n| eval match_user=mvmap(user,if(lower(user)=lower($entity|s$),1,0)), match_dest=mvmap(dest,if(lower(dest)=lower($entity|s$),1,0)), match_dvc=mvmap(dvc,if(lower(dvc)=lower($entity|s$),1,0)), match_risk=mvmap(risk_object,if(lower(risk_object)=lower($entity|s$),1,0)), match_src=mvmap(src,if(src=$entity|s$,1,0))\n| where ($entity_kind|s$=\"user\" AND (isnotnull(mvfind(match_user,\"^1$\")) OR (risk_object_type=\"user\" AND isnotnull(mvfind(match_risk,\"^1$\"))))) OR ($entity_kind|s$=\"machine\" AND (isnotnull(mvfind(match_dest,\"^1$\")) OR isnotnull(mvfind(match_dvc,\"^1$\")) OR (risk_object_type=\"system\" AND isnotnull(mvfind(match_risk,\"^1$\"))))) OR ($entity_kind|s$=\"ip\" AND (isnotnull(mvfind(match_src,\"^1$\")) OR isnotnull(mvfind(match_dest,\"^1$\")) OR isnotnull(mvfind(match_risk,\"^1$\"))))\n| sort 100 - _time\n| eval finding_id=coalesce(event_id,notable_event_id,md5(_raw.tostring(_time))), detection=coalesce(rule_title,rule_name,search_name,source,\"(non renseignée)\")\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\"), _earliest=_time-1800, _latest=_time+1800\n| table heure detection severity finding_id user src dest dvc risk_object _earliest _latest"
       }
     },
     "ds_selected_events": {
@@ -348,7 +357,18 @@
           "earliest": "$selected_earliest$",
           "latest": "$selected_latest$"
         },
-        "query": "(tag=authentication OR (tag=process tag=report) OR (tag=network tag=communicate)) (user=$selected_entity|s$ OR src=$selected_entity|s$ OR dest=$selected_entity|s$)\n| where ($selected_kind|s$=\"user\" AND lower(user)=lower($selected_entity|s$)) OR ($selected_kind|s$=\"machine\" AND lower(dest)=lower($selected_entity|s$)) OR ($selected_kind|s$=\"ip\" AND (src=$selected_entity|s$ OR dest=$selected_entity|s$))\n| sort 200 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure index sourcetype user src dest action process_name parent_process_name process _raw"
+        "query": "index=* NOT index=notable NOT index=risk (tag=authentication OR (tag=process tag=report) OR (tag=network tag=communicate)) (user=$entity|s$ OR src=$entity|s$ OR dest=$entity|s$)\n| where ($entity_kind|s$=\"user\" AND lower(user)=lower($entity|s$)) OR ($entity_kind|s$=\"machine\" AND lower(dest)=lower($entity|s$)) OR ($entity_kind|s$=\"ip\" AND (src=$entity|s$ OR dest=$entity|s$))\n| sort 200 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure index sourcetype user src dest action process_name parent_process_name process _raw"
+      }
+    },
+    "ds_selection": {
+      "type": "ds.search",
+      "name": "Confirmation de la sélection",
+      "options": {
+        "queryParameters": {
+          "earliest": "-1m",
+          "latest": "now"
+        },
+        "query": "| makeresults\n| eval finding=$selected_finding|s$, entite=$entity|s$, debut=if(tonumber($selected_earliest|s$)>0,strftime(tonumber($selected_earliest|s$),\"%Y-%m-%d %H:%M:%S %Z\"),\"—\"), fin=if(tonumber($selected_latest|s$)>1,strftime(tonumber($selected_latest|s$),\"%Y-%m-%d %H:%M:%S %Z\"),\"—\")\n| table finding entite debut fin"
       }
     }
   },
@@ -490,7 +510,7 @@
         "type": "absolute",
         "options": {
           "width": 1440,
-          "height": 1200,
+          "height": 1350,
           "display": "auto-scale"
         },
         "structure": [
@@ -519,7 +539,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 565,
+              "y": 705,
               "w": 1400,
               "h": 430
             }
@@ -529,9 +549,19 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 1015,
+              "y": 1155,
               "w": 1400,
               "h": 165
+            }
+          },
+          {
+            "item": "viz_selection",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 565,
+              "w": 1400,
+              "h": 120
             }
           }
         ]
