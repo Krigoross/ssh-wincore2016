@@ -1,6 +1,6 @@
 {
   "title": "SOC | Contexte de l’entité",
-  "description": "V8.3 — suppression du champ IP facultatif qui laissait un token non défini. Entité unique obligatoire, aliases/IP facultatifs dans le même champ séparés par ;. Finding facultatif ; périodes natives Dashboard Studio.",
+  "description": "V9 — contexte d’entité sur les bornes du premier drilldown lorsqu’un finding est sélectionné ; sinon période d’investigation. Pas de fenêtre centrée sur _time. Repli explicite si bornes indisponibles.",
   "inputs": {
     "input_kind": {
       "type": "input.dropdown",
@@ -40,36 +40,6 @@
         "defaultValue": "-4h,now"
       }
     },
-    "input_window": {
-      "type": "input.dropdown",
-      "title": "Fenêtre autour du finding",
-      "options": {
-        "token": "window_seconds",
-        "defaultValue": "1800",
-        "items": [
-          {
-            "label": "±5 minutes",
-            "value": "300"
-          },
-          {
-            "label": "±15 minutes",
-            "value": "900"
-          },
-          {
-            "label": "±30 minutes",
-            "value": "1800"
-          },
-          {
-            "label": "±1 heure",
-            "value": "3600"
-          },
-          {
-            "label": "±2 heures",
-            "value": "7200"
-          }
-        ]
-      }
-    },
     "input_reset": {
       "type": "input.button",
       "options": {
@@ -85,8 +55,20 @@
                 "value": "none"
               },
               {
-                "token": "focus_epoch",
+                "token": "focus_begin",
                 "value": "0"
+              },
+              {
+                "token": "focus_end",
+                "value": "0"
+              },
+              {
+                "token": "focus_dd_valid",
+                "value": "no"
+              },
+              {
+                "token": "focus_dd_name",
+                "value": "-"
               },
               {
                 "token": "focus_entity",
@@ -118,7 +100,7 @@
       "type": "ds.search",
       "name": "Période affichée",
       "options": {
-        "query": "| makeresults\n| eval entite=$entity|s$, selected_id=$focus_id|s$, selected_time=$focus_epoch|s$, selected_entity=$focus_entity|s$, selected_kind=$focus_kind|s$, kind=$entity_kind|s$, active_begin=\"$eval:activeEarliest$\", active_end=\"$eval:activeLatest$\"\n| eval active_begin_number=tonumber(active_begin), active_end_number=tonumber(active_end), selected_time_number=tonumber(selected_time)\n| eval begin_epoch=case(isnotnull(active_begin_number),active_begin_number,true(),relative_time(now(),active_begin)), end_epoch=case(active_end=\"now\",now(),isnotnull(active_end_number),active_end_number,true(),relative_time(now(),active_end))\n| eval use_finding=if(selected_id!=\"none\" AND selected_time_number>0 AND selected_entity=entite AND selected_kind=kind,1,0)\n| eval mode=if(use_finding=1,\"Autour du finding sélectionné\",\"Période d’investigation\"), finding=if(use_finding=1,selected_id,\"Aucun — sélection facultative\"), debut=strftime(begin_epoch,\"%Y-%m-%d %H:%M:%S %Z\"), fin=strftime(end_epoch,\"%Y-%m-%d %H:%M:%S %Z\"), statut=if(isnotnull(begin_epoch) AND isnotnull(end_epoch) AND end_epoch>begin_epoch,\"Prêt\",\"Période invalide\")\n| table entite mode finding debut fin statut",
+        "query": "| makeresults\n| eval entite=$entity|s$, selected_id=$focus_id|s$, selected_entity=$focus_entity|s$, selected_kind=$focus_kind|s$, kind=$entity_kind|s$, dd_valid=$focus_dd_valid|s$, dd_name=$focus_dd_name|s$, active_begin=\"$eval:activeEarliest$\", active_end=\"$eval:activeLatest$\"\n| eval active_begin_number=tonumber(active_begin), active_end_number=tonumber(active_end)\n| eval begin_epoch=case(isnotnull(active_begin_number),active_begin_number,true(),relative_time(now(),active_begin)), end_epoch=case(active_end=\"now\",now(),isnotnull(active_end_number),active_end_number,true(),relative_time(now(),active_end))\n| eval finding_selected=if(selected_id!=\"none\" AND selected_entity=entite AND selected_kind=kind,1,0)\n| eval mode=case(finding_selected=1 AND dd_valid=\"yes\",\"Période du drilldown associé\",finding_selected=1,\"Drilldown sans période exploitable : période d’investigation\",true(),\"Période d’investigation\"), finding=if(finding_selected=1,selected_id,\"Aucun — sélection facultative\"), drilldown=if(finding_selected=1,dd_name,\"—\"), debut=strftime(begin_epoch,\"%Y-%m-%d %H:%M:%S %Z\"), fin=strftime(end_epoch,\"%Y-%m-%d %H:%M:%S %Z\"), statut=if(isnotnull(begin_epoch) AND isnotnull(end_epoch) AND end_epoch>begin_epoch,\"Prêt\",\"Période invalide\")\n| table entite mode finding drilldown debut fin statut",
         "queryParameters": {
           "earliest": "-1m",
           "latest": "now"
@@ -206,7 +188,7 @@
       "type": "ds.search",
       "name": "Findings facultatifs de l’entité",
       "options": {
-        "query": "index=notable [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n]\n| sort 100 - _time\n| eval finding_id=coalesce(event_id,notable_event_id,md5(_raw.tostring(_time))), detection=coalesce(rule_title,rule_name,search_name,source,\"(non renseignée)\"), heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\"), _focus_time=_time, _focus_entity=$entity|s$, _focus_kind=$entity_kind|s$\n| table heure detection severity finding_id user src dest dvc risk_object _focus_time _focus_entity _focus_kind",
+        "query": "index=notable [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n]\n| sort 100 - _time\n| lookup correlationsearches_lookup _key AS source OUTPUTNEW drilldown_searches drilldown_search drilldown_name drilldown_earliest_offset drilldown_latest_offset\n| spath input=drilldown_searches path={} output=dd_array\n| eval dd_object=coalesce(mvindex(dd_array,0),mvindex(drilldown_searches,0))\n| spath input=dd_object path=name output=dd_json_name\n| spath input=dd_object path=search output=dd_json_search\n| spath input=dd_object path=earliest_offset output=dd_json_eoffset\n| spath input=dd_object path=latest_offset output=dd_json_loffset\n| spath input=dd_object path=earliest output=dd_json_earliest\n| spath input=dd_object path=latest output=dd_json_latest\n| eval dd_name=coalesce(dd_json_name,drilldown_name,\"Première recherche associée\"), dd_search=coalesce(dd_json_search,drilldown_search), dd_e=coalesce(dd_json_earliest,dd_json_eoffset,drilldown_earliest_offset), dd_l=coalesce(dd_json_latest,dd_json_loffset,drilldown_latest_offset)\n| eval dd_e=trim(tostring(mvindex(dd_e,0))), dd_l=trim(tostring(mvindex(dd_l,0))), info_min_text=trim(tostring(mvindex(info_min_time,0))), info_max_text=trim(tostring(mvindex(info_max_time,0))), dd_e_raw=dd_e, dd_l_raw=dd_l\n| expandtoken dd_e,dd_l,dd_name\n| eval dd_e=trim(tostring(mvindex(dd_e,0))), dd_l=trim(tostring(mvindex(dd_l,0)))\n| eval dd_e_number=tonumber(dd_e), dd_l_number=tonumber(dd_l), info_min_number=tonumber(info_min_text), info_max_number=tonumber(info_max_text)\n| eval dd_begin=case(isnotnull(dd_json_earliest) AND isnotnull(dd_e_number),dd_e_number,isnotnull(dd_json_earliest) AND match(dd_e,\"^-\"),relative_time(now(),dd_e),like(dd_e_raw,\"%info_min_time%\"),info_min_number,match(dd_e_raw,\"^[0-9]+$\"),_time-dd_e_number,match(dd_e_raw,\"^[0-9]+[smhdw]$\"),relative_time(_time,\"-\".dd_e),isnotnull(dd_e_number),dd_e_number,true(),null()), dd_end=case(isnotnull(dd_json_latest) AND isnotnull(dd_l_number),dd_l_number,dd_l=\"now\",now(),like(dd_l_raw,\"%info_max_time%\"),info_max_number,match(dd_l_raw,\"^[0-9]+$\"),_time+dd_l_number,match(dd_l_raw,\"^[0-9]+[smhdw]$\"),relative_time(_time,\"+\".dd_l),isnotnull(dd_l_number),dd_l_number,true(),null())\n| eval periode_drilldown=case(isnull(dd_search) OR len(trim(dd_search))=0,\"Aucun drilldown associé\",isnull(dd_begin) OR isnull(dd_end) OR dd_begin<0 OR dd_end<=dd_begin,\"Bornes indisponibles : période d’investigation conservée\",true(),\"Période du drilldown disponible\")\n| eval _dd_valid=if(periode_drilldown=\"Période du drilldown disponible\",\"yes\",\"no\"), _dd_start=if(_dd_valid=\"yes\",dd_begin,0), _dd_end=if(_dd_valid=\"yes\",dd_end,0), debut_drilldown=if(_dd_valid=\"yes\",strftime(dd_begin,\"%Y-%m-%d %H:%M:%S %Z\"),\"—\"), fin_drilldown=if(_dd_valid=\"yes\",strftime(dd_end,\"%Y-%m-%d %H:%M:%S %Z\"),\"—\"), _dd_name=if(isnull(dd_name) OR dd_name=\"\",\"-\",dd_name)\n| eval finding_id=coalesce(event_id,notable_event_id,md5(_raw.tostring(_time))), detection=coalesce(rule_title,rule_name,search_name,source,\"(non renseignée)\"), heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\"), _focus_entity=$entity|s$, _focus_kind=$entity_kind|s$\n| table heure detection severity finding_id periode_drilldown debut_drilldown fin_drilldown user src dest dvc risk_object _dd_start _dd_end _dd_valid _dd_name _focus_entity _focus_kind",
         "queryParameters": {
           "earliest": "$global_time.earliest$",
           "latest": "$global_time.latest$"
@@ -219,7 +201,7 @@
       "type": "splunk.markdown",
       "title": "",
       "options": {
-        "markdown": "# Contexte de l’entité\nSaisir une entité, choisir la période puis **Submit**. Pour ajouter une IP ou un autre nom du poste, saisir par exemple **PC01;10.0.0.8** dans ce même champ. Sans finding, l’activité utilise la période d’investigation. Cliquer sur un finding pour centrer l’activité sur son horodatage ; le bouton ci-dessous restaure la période choisie."
+        "markdown": "# Contexte de l’entité\nSaisir une entité, choisir la période puis **Submit**. Sans finding sélectionné, l’activité utilise cette période. Cliquer sur un finding applique la **période de son premier drilldown associé**, sans fenêtre ajoutée autour du finding. Les colonnes de la liste montrent les bornes résolues. Le bouton ci-dessous restaure la période d’investigation."
       }
     },
     "viz_scope": {
@@ -241,7 +223,7 @@
       "dataSources": {
         "primary": "ds_findings"
       },
-      "description": "Liste filtrée sur l’entité et la période d’investigation. Cliquer sur une cellule pour centrer l’activité sur _time du finding.",
+      "description": "Liste sur la période d’investigation. Cliquer sur un finding pour appliquer les bornes de son premier drilldown à tous les panneaux d’activité.",
       "eventHandlers": [
         {
           "type": "drilldown.setToken",
@@ -252,8 +234,20 @@
                 "key": "row.finding_id.value"
               },
               {
-                "token": "focus_epoch",
-                "key": "row._focus_time.value"
+                "token": "focus_begin",
+                "key": "row._dd_start.value"
+              },
+              {
+                "token": "focus_end",
+                "key": "row._dd_end.value"
+              },
+              {
+                "token": "focus_dd_valid",
+                "key": "row._dd_valid.value"
+              },
+              {
+                "token": "focus_dd_name",
+                "key": "row._dd_name.value"
               },
               {
                 "token": "focus_entity",
@@ -390,7 +384,7 @@
       "type": "splunk.markdown",
       "title": "",
       "options": {
-        "markdown": "**Périmètre** : tous les panneaux utilisent la même période active. Aucun finding → période du sélecteur ; finding sélectionné → fenêtre autour de son _time. Changer d’entité ou de type invalide la sélection précédente. Les aliases sont facultatifs dans le même champ : hostname;FQDN;IP. Seuls les aliases dont l’attribution à cette période est connue doivent être utilisés ; aucune attribution DHCP historique n’est inférée. Les vues spécialisées utilisent les tags CIM ; les logs sans tags restent dans la vue brute. host peut désigner un collecteur selon la source. 500 événements récents par catégorie, 1000 événements bruts. Ouvrir les recherches pour approfondir."
+        "markdown": "**Période** : finding absent → période d’investigation ; finding sélectionné → bornes de son premier drilldown. Les offsets configurés et les paramètres info_min_time/info_max_time sont résolus avec les champs du finding. La liste des findings garde la période du sélecteur. Bornes absentes ou invalides : repli sur la période d’investigation, signalé en haut. La période correspond aux métadonnées du drilldown ; les directives temporelles intégrées dans un SPL personnalisé ne sont pas interprétées ici. Lookup correlationsearches_lookup et commande expandtoken ES doivent être accessibles dans l’application du dashboard. Les panneaux d’activité restent indépendants. Aliases : hostname;FQDN;IP. Tags CIM pour les vues spécialisées ; tous types dans la vue brute. 500 événements par catégorie, 1000 bruts."
       }
     },
     "viz_entity_filter": {
@@ -410,13 +404,22 @@
         "focus_id": {
           "value": "none"
         },
-        "focus_epoch": {
-          "value": "0"
-        },
         "focus_entity": {
           "value": "-"
         },
         "focus_kind": {
+          "value": "-"
+        },
+        "focus_begin": {
+          "value": "0"
+        },
+        "focus_end": {
+          "value": "0"
+        },
+        "focus_dd_valid": {
+          "value": "no"
+        },
+        "focus_dd_name": {
           "value": "-"
         }
       }
@@ -431,8 +434,7 @@
     "globalInputs": [
       "input_kind",
       "input_entity",
-      "input_time",
-      "input_window"
+      "input_time"
     ],
     "options": {
       "submitButton": true,
@@ -593,11 +595,11 @@
     "eval": {
       "eval_active_begin": {
         "name": "activeEarliest",
-        "value": "($focus_id$ != 'none' and $number($focus_epoch$) > 0 and $focus_entity$ = $entity$ and $focus_kind$ = $entity_kind$) ? $string($max([0, $number($focus_epoch$) - $number($window_seconds$)])) : $global_time.earliest$"
+        "value": "($focus_id$ != 'none' and $focus_dd_valid$ = 'yes' and $number($focus_end$) > $number($focus_begin$) and $focus_entity$ = $entity$ and $focus_kind$ = $entity_kind$) ? $string($number($focus_begin$)) : $global_time.earliest$"
       },
       "eval_active_end": {
         "name": "activeLatest",
-        "value": "($focus_id$ != 'none' and $number($focus_epoch$) > 0 and $focus_entity$ = $entity$ and $focus_kind$ = $entity_kind$) ? $string($number($focus_epoch$) + $number($window_seconds$)) : $global_time.latest$"
+        "value": "($focus_id$ != 'none' and $focus_dd_valid$ = 'yes' and $number($focus_end$) > $number($focus_begin$) and $focus_entity$ = $entity$ and $focus_kind$ = $entity_kind$) ? $string($number($focus_end$)) : $global_time.latest$"
       }
     }
   }
