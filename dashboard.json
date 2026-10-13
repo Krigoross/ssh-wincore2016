@@ -1,6 +1,6 @@
 {
   "title": "SOC | Contexte de l’entité",
-  "description": "V8 — investigation par entité ; finding facultatif pour centrer la période. Activité brute, authentifications, processus, réseau et DNS/Web. Splunk Cloud 10.5.2605 / ES 8.6.1 ; recherches à valider sur instance.",
+  "description": "V8.1 — source du filtre reliée au panneau Entité recherchée pour alimenter les recherches dépendantes. Finding facultatif, période active commune. Validation sur instance requise.",
   "inputs": {
     "input_kind": {
       "type": "input.dropdown",
@@ -115,7 +115,7 @@
       "type": "ds.search",
       "name": "EntityFilter",
       "options": {
-        "query": "| makeresults\n| eval principal=$entity|s$, extra_ip=$entity_ip|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\")), value=principal\n| appendpipe [| where kind=\"machine\" AND len(trim(extra_ip))>0 AND NOT match(extra_ip,\"[*?]\") | eval keys=split(\"src,dest,src_ip,dest_ip,dvc_ip,risk_object\",\",\"), value=extra_ip]\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,src_ip,dest_ip,dvc_ip\n| format mvsep=\"OR\" emptystr=\"(1=0)\"",
+        "query": "| makeresults\n| eval principal=$entity|s$, extra_ip=$entity_ip|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\")), value=principal\n| appendpipe [| where kind=\"machine\" AND len(trim(extra_ip))>0 AND NOT match(extra_ip,\"[*?]\") | eval keys=split(\"src,dest,src_ip,dest_ip,dvc_ip,risk_object\",\",\"), value=extra_ip]\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,src_ip,dest_ip,dvc_ip\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n| rename search AS _entity_query\n| eval entite=$entity|s$, type_entite=$entity_kind|s$, ip_poste=if(type_entite=\"machine\",$entity_ip|s$,\"\"), statut=if(_entity_query=\"(1=0)\",\"Saisir une entité exacte sans joker\",\"Filtre prêt\")\n| table entite type_entite ip_poste statut _entity_query",
         "queryParameters": {
           "earliest": "-1m",
           "latest": "now"
@@ -139,7 +139,7 @@
       "type": "ds.search",
       "name": "Volume de l’activité",
       "options": {
-        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result.search|n$\n| stats count AS evenements dc(sourcetype) AS types_logs dc(index) AS indexes min(_time) AS premiere_observation max(_time) AS derniere_observation\n| convert ctime(premiere_observation) ctime(derniere_observation)",
+        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result._entity_query|n$\n| stats count AS evenements dc(sourcetype) AS types_logs dc(index) AS indexes min(_time) AS premiere_observation max(_time) AS derniere_observation\n| convert ctime(premiere_observation) ctime(derniere_observation)",
         "queryParameters": {
           "earliest": "$ContextScope:result._active_begin$",
           "latest": "$ContextScope:result._active_end$"
@@ -150,7 +150,7 @@
       "type": "ds.search",
       "name": "Chronologie de l’activité",
       "options": {
-        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result.search|n$\n| timechart span=5m count BY sourcetype limit=8 useother=true",
+        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result._entity_query|n$\n| timechart span=5m count BY sourcetype limit=8 useother=true",
         "queryParameters": {
           "earliest": "$ContextScope:result._active_begin$",
           "latest": "$ContextScope:result._active_end$"
@@ -161,7 +161,7 @@
       "type": "ds.search",
       "name": "Événements de l’entité",
       "options": {
-        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result.search|n$\n| sort 1000 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure index sourcetype host user src dest dvc action process_name process _raw",
+        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result._entity_query|n$\n| sort 1000 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure index sourcetype host user src dest dvc action process_name process _raw",
         "queryParameters": {
           "earliest": "$ContextScope:result._active_begin$",
           "latest": "$ContextScope:result._active_end$"
@@ -172,7 +172,7 @@
       "type": "ds.search",
       "name": "Authentifications de l’entité",
       "options": {
-        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result.search|n$ tag=authentication\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src dest action app signature authentication_method sourcetype _raw",
+        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result._entity_query|n$ tag=authentication\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src dest action app signature authentication_method sourcetype _raw",
         "queryParameters": {
           "earliest": "$ContextScope:result._active_begin$",
           "latest": "$ContextScope:result._active_end$"
@@ -183,7 +183,7 @@
       "type": "ds.search",
       "name": "Processus de l’entité",
       "options": {
-        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result.search|n$ tag=process tag=report\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| eval commande=coalesce(process,process_command_line,CommandLine), pid=coalesce(process_id,ProcessId,ProcessID), parent_pid=coalesce(parent_process_id,ParentProcessId), guid=coalesce(process_guid,ProcessGuid), parent_guid=coalesce(parent_process_guid,ParentProcessGuid)\n| table heure host dest user process_name commande parent_process_name pid parent_pid guid parent_guid sourcetype _raw",
+        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result._entity_query|n$ tag=process tag=report\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| eval commande=coalesce(process,process_command_line,CommandLine), pid=coalesce(process_id,ProcessId,ProcessID), parent_pid=coalesce(parent_process_id,ParentProcessId), guid=coalesce(process_guid,ProcessGuid), parent_guid=coalesce(parent_process_guid,ParentProcessGuid)\n| table heure host dest user process_name commande parent_process_name pid parent_pid guid parent_guid sourcetype _raw",
         "queryParameters": {
           "earliest": "$ContextScope:result._active_begin$",
           "latest": "$ContextScope:result._active_end$"
@@ -194,7 +194,7 @@
       "type": "ds.search",
       "name": "Communications de l’entité",
       "options": {
-        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result.search|n$ tag=network tag=communicate\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src src_port dest dest_port transport action bytes_in bytes_out process_guid sourcetype _raw",
+        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result._entity_query|n$ tag=network tag=communicate\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src src_port dest dest_port transport action bytes_in bytes_out process_guid sourcetype _raw",
         "queryParameters": {
           "earliest": "$ContextScope:result._active_begin$",
           "latest": "$ContextScope:result._active_end$"
@@ -205,7 +205,7 @@
       "type": "ds.search",
       "name": "DNS et Web de l’entité",
       "options": {
-        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result.search|n$ (tag=dns OR tag=web)\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src dest query answer url http_method status sourcetype _raw",
+        "query": "index=* NOT index=notable NOT index=risk $EntityFilter:result._entity_query|n$ (tag=dns OR tag=web)\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src dest query answer url http_method status sourcetype _raw",
         "queryParameters": {
           "earliest": "$ContextScope:result._active_begin$",
           "latest": "$ContextScope:result._active_end$"
@@ -216,7 +216,7 @@
       "type": "ds.search",
       "name": "Findings facultatifs de l’entité",
       "options": {
-        "query": "index=notable $EntityFilter:result.search|n$\n| sort 100 - _time\n| eval finding_id=coalesce(event_id,notable_event_id,md5(_raw.tostring(_time))), detection=coalesce(rule_title,rule_name,search_name,source,\"(non renseignée)\"), heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\"), _focus_time=_time, _focus_entity=$entity|s$, _focus_kind=$entity_kind|s$\n| table heure detection severity finding_id user src dest dvc risk_object _focus_time _focus_entity _focus_kind",
+        "query": "index=notable $EntityFilter:result._entity_query|n$\n| sort 100 - _time\n| eval finding_id=coalesce(event_id,notable_event_id,md5(_raw.tostring(_time))), detection=coalesce(rule_title,rule_name,search_name,source,\"(non renseignée)\"), heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\"), _focus_time=_time, _focus_entity=$entity|s$, _focus_kind=$entity_kind|s$\n| table heure detection severity finding_id user src dest dvc risk_object _focus_time _focus_entity _focus_kind",
         "queryParameters": {
           "earliest": "$global_time.earliest$",
           "latest": "$global_time.latest$"
@@ -402,6 +402,16 @@
       "options": {
         "markdown": "**Périmètre** : même recherche d’entité et même période active pour tous les panneaux. Finding absent → période du sélecteur ; finding sélectionné → fenêtre autour de son _time. Changer d’entité ou de type invalide le finding précédent. L’IP facultative s’applique aux postes ; son attribution à la période choisie doit être connue. Aucune résolution automatique hostname/IP, DHCP ou alias de compte. Les panneaux spécialisés utilisent les tags CIM ; les événements sans ces tags restent accessibles dans la vue brute. Les champs recherchés pour une machine incluent host, dest, src, dvc, Computer et les variantes hostname : host peut désigner un collecteur selon la source. Listes plafonnées ; ouvrir la recherche et retirer le sort limité pour aller au-delà. Horaires dans le fuseau Splunk de l’utilisateur."
       }
+    },
+    "viz_entity_filter": {
+      "type": "splunk.table",
+      "title": "Entité recherchée",
+      "options": {
+        "showInternalFields": false
+      },
+      "dataSources": {
+        "primary": "ds_entity_filter"
+      }
     }
   },
   "defaults": {
@@ -452,7 +462,7 @@
         "type": "absolute",
         "options": {
           "width": 1440,
-          "height": 3090,
+          "height": 3215,
           "display": "auto-scale"
         },
         "structure": [
@@ -481,7 +491,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 230,
+              "y": 355,
               "w": 1400,
               "h": 110
             }
@@ -491,7 +501,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 360,
+              "y": 485,
               "w": 1400,
               "h": 245
             }
@@ -501,7 +511,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 625,
+              "y": 750,
               "w": 1400,
               "h": 105
             }
@@ -511,7 +521,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 750,
+              "y": 875,
               "w": 1400,
               "h": 230
             }
@@ -521,7 +531,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 1000,
+              "y": 1125,
               "w": 1400,
               "h": 285
             }
@@ -531,7 +541,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 1305,
+              "y": 1430,
               "w": 1400,
               "h": 300
             }
@@ -541,7 +551,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 1625,
+              "y": 1750,
               "w": 1400,
               "h": 285
             }
@@ -551,7 +561,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 1930,
+              "y": 2055,
               "w": 1400,
               "h": 260
             }
@@ -561,7 +571,7 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 2210,
+              "y": 2335,
               "w": 1400,
               "h": 550
             }
@@ -571,9 +581,19 @@
             "type": "block",
             "position": {
               "x": 20,
-              "y": 2780,
+              "y": 2905,
               "w": 1400,
               "h": 270
+            }
+          },
+          {
+            "item": "viz_entity_filter",
+            "type": "block",
+            "position": {
+              "x": 20,
+              "y": 230,
+              "w": 1400,
+              "h": 105
             }
           }
         ]
