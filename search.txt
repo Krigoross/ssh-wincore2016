@@ -1,6 +1,7 @@
 index=_internal host="NOM_DU_PC" source=*splunkd.log*
 earliest=-24h latest=now
-(component=TcpOutputProc OR component=TcpOutputFd
- OR component=AutoLoadBalancedConnectionStrategy)
-| sort 200 - _time
-| table _time component log_level _raw
+("Applying quarantine" OR "Removing quarantine"
+ OR "timed out" OR "Connection to host"
+ OR "unreachable" OR "impossible à atteindre"
+ OR "Connect to")
+| timechart span=5m count AS messages_connexion
