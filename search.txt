@@ -10,14 +10,10 @@ index=_internal source=*splunkd.log* earliest=-24h latest=now
 | where isnotnull(resultat)
 | stats count(eval(resultat="reussite")) AS nb_reussites
         count(eval(resultat="echec")) AS nb_echecs
-        max(eval(if(resultat="reussite",_time,null()))) AS derniere_reussite
-        max(eval(if(resultat="echec",_time,null()))) AS dernier_echec
   BY host
-| eval groupe=case(
-    nb_reussites>0 AND nb_echecs>0,"Réussites et échecs",
-    nb_echecs>0,"Échecs uniquement",
-    true(),"Réussites uniquement"
-  )
-| convert ctime(derniere_reussite) ctime(dernier_echec)
-| table groupe host nb_reussites nb_echecs derniere_reussite dernier_echec
-| sort 0 groupe - nb_echecs
+| eval groupe=if(nb_echecs>0,"Échec","Réussite uniquement")
+| stats count AS nb_hosts
+        values(host) AS hosts
+        sum(nb_reussites) AS nb_reussites
+        sum(nb_echecs) AS nb_echecs
+  BY groupe
