@@ -1,7 +1,9 @@
+
 index=_internal host="NOM_DU_PC" source=*splunkd.log*
 earliest=-24h latest=now
 ("Applying quarantine" OR "Removing quarantine"
  OR "timed out" OR "Connection to host"
  OR "unreachable" OR "impossible à atteindre"
  OR "Connect to")
-| timechart span=5m count AS messages_connexion
+| sort 100 - _time
+| table _time host component _raw
