@@ -1,23 +1,23 @@
-index=_internal host="NOM_DU_PC" source=*splunkd.log*
-earliest=-24h latest=now
-(component=TcpOutputProc OR component=TcpOutputFd
- OR component=AutoLoadBalancedConnectionStrategy)
-(log_level=WARN OR log_level=ERROR)
-| rex field=_raw "(?i)\b(?:ip|host_dest|idx)=(?<destination_extraite>[^\s,;]+)"
-| eval destination=coalesce(host_dest,destination_extraite,"Voir le message complet")
-| eval type_erreur=case(
-    match(_raw,"(?i)unreachable|impossible.*atteindre|10051"),"Réseau inaccessible",
-    match(_raw,"(?i)refused|10061"),"Connexion refusée",
-    match(_raw,"(?i)timed out|timeout|10060"),"Expiration du délai",
-    match(_raw,"(?i)SSL|TLS|certificate"),"TLS / certificat",
-    match(_raw,"(?i)Applying quarantine"),"Mise en quarantaine",
-    match(_raw,"(?i)Removing quarantine"),"Sortie de quarantaine",
-    true(),"Autre"
+index=_internal source=*splunkd.log* earliest=-24h latest=now
+("Connected to idx" OR "Cooked connection"
+ OR "Connection to host" OR "Connect to")
+| eval resultat=case(
+    match(_raw,"(?i)\bConnected to idx"),"reussite",
+    match(_raw,"(?i)\bCooked connection.*timed out"),"echec",
+    match(_raw,"(?i)\bConnection to host.*failed"),"echec",
+    match(_raw,"(?i)\bConnect to .*failed"),"echec"
   )
-| stats count AS occurrences
-        earliest(_time) AS debut
-        latest(_time) AS fin
-        latest(_raw) AS exemple_message
-  BY host destination component type_erreur
-| convert ctime(debut) ctime(fin)
-| sort 0 - occurrences
+| where isnotnull(resultat)
+| stats count(eval(resultat="reussite")) AS nb_reussites
+        count(eval(resultat="echec")) AS nb_echecs
+        max(eval(if(resultat="reussite",_time,null()))) AS derniere_reussite
+        max(eval(if(resultat="echec",_time,null()))) AS dernier_echec
+  BY host
+| eval groupe=case(
+    nb_reussites>0 AND nb_echecs>0,"Réussites et échecs",
+    nb_echecs>0,"Échecs uniquement",
+    true(),"Réussites uniquement"
+  )
+| convert ctime(derniere_reussite) ctime(dernier_echec)
+| table groupe host nb_reussites nb_echecs derniere_reussite dernier_echec
+| sort 0 groupe - nb_echecs
