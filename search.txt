@@ -1,9 +1,23 @@
-
 index=_internal host="NOM_DU_PC" source=*splunkd.log*
 earliest=-24h latest=now
-("Applying quarantine" OR "Removing quarantine"
- OR "timed out" OR "Connection to host"
- OR "unreachable" OR "impossible à atteindre"
- OR "Connect to")
-| sort 100 - _time
-| table _time host component _raw
+(component=TcpOutputProc OR component=TcpOutputFd
+ OR component=AutoLoadBalancedConnectionStrategy)
+(log_level=WARN OR log_level=ERROR)
+| rex field=_raw "(?i)\b(?:ip|host_dest|idx)=(?<destination_extraite>[^\s,;]+)"
+| eval destination=coalesce(host_dest,destination_extraite,"Voir le message complet")
+| eval type_erreur=case(
+    match(_raw,"(?i)unreachable|impossible.*atteindre|10051"),"Réseau inaccessible",
+    match(_raw,"(?i)refused|10061"),"Connexion refusée",
+    match(_raw,"(?i)timed out|timeout|10060"),"Expiration du délai",
+    match(_raw,"(?i)SSL|TLS|certificate"),"TLS / certificat",
+    match(_raw,"(?i)Applying quarantine"),"Mise en quarantaine",
+    match(_raw,"(?i)Removing quarantine"),"Sortie de quarantaine",
+    true(),"Autre"
+  )
+| stats count AS occurrences
+        earliest(_time) AS debut
+        latest(_time) AS fin
+        latest(_raw) AS exemple_message
+  BY host destination component type_erreur
+| convert ctime(debut) ctime(fin)
+| sort 0 - occurrences
