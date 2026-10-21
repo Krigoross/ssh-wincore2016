@@ -1,15 +1,8 @@
 index=_internal host="NOM_DU_PC" source=*metrics.log*
 group=queue earliest=-24h latest=now
+(name=parsingqueue OR name=tcpout*)
 | eval remplissage_pct=case(
     max_size_kb>0,100*current_size_kb/max_size_kb,
     max_size>0,100*current_size/max_size
   )
-| stats count AS nb_mesures
-        avg(remplissage_pct) AS remplissage_moyen_pct
-        max(remplissage_pct) AS remplissage_max_pct
-        count(eval(blocked="true")) AS mesures_bloquees
-  BY name
-| eval remplissage_moyen_pct=round(remplissage_moyen_pct,2),
-       remplissage_max_pct=round(remplissage_max_pct,2),
-       pct_mesures_bloquees=round(100*mesures_bloquees/nb_mesures,1)
-| sort 0 - mesures_bloquees
+| timechart span=1m max(remplissage_pct) BY name
