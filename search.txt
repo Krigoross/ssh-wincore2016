@@ -1,8 +1,6 @@
-index=_internal host="NOM_DU_PC" source=*metrics.log*
-group=queue earliest=-24h latest=now
-(name=parsingqueue OR name=tcpout*)
-| eval remplissage_pct=case(
-    max_size_kb>0,100*current_size_kb/max_size_kb,
-    max_size>0,100*current_size/max_size
-  )
-| timechart span=1m max(remplissage_pct) BY name
+index=_internal host="NOM_DU_PC" source=*splunkd.log*
+earliest=-24h latest=now
+(component=TcpOutputProc OR component=TcpOutputFd
+ OR component=AutoLoadBalancedConnectionStrategy)
+| sort 200 - _time
+| table _time component log_level _raw
