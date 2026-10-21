@@ -1,9 +1,10 @@
-index=MON_INDEX host="MA_MACHINE" earliest=0 latest=now _index_earliest=-24h _index_latest=now
-| eval delai_s=_indextime-_time
-| sort 20 - delai_s
-| eval delai_min=round(delai_s/60,2),
-       delai_jours=round(delai_s/86400,2),
-       heure_log=strftime(_time,"%Y-%m-%d %H:%M:%S %z"),
-       heure_indexation=strftime(_indextime,"%Y-%m-%d %H:%M:%S %z")
-| table host source sourcetype heure_log heure_indexation
-        delai_s delai_min delai_jours _raw
+index=_internal source=*metrics.log* group=queue earliest=-24h latest=now
+| eval remplissage_pct=case(
+    max_size_kb>0,100*current_size_kb/max_size_kb,
+    max_size>0,100*current_size/max_size
+  )
+| stats max(remplissage_pct) AS remplissage_max_pct
+        count(eval(blocked="true")) AS mesures_bloquees
+  BY host name
+| eval remplissage_max_pct=round(remplissage_max_pct,1)
+| sort 0 - mesures_bloquees - remplissage_max_pct
