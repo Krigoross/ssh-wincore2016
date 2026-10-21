@@ -1,15 +1,22 @@
+
 index=MON_INDEX earliest=0 latest=now _index_earliest=-24h _index_latest=now
-| fields index host _time _indextime
+| fields index host source sourcetype _time _indextime _raw
 | eval delai_s=_indextime-_time
-| stats count AS nb_logs
+| eventstats count AS nb_logs
         avg(delai_s) AS moyenne_s
         perc95(delai_s) AS p95_s
         max(delai_s) AS maximum_s
         count(eval(delai_s>300)) AS logs_plus_5min
         count(eval(delai_s<0)) AS logs_delai_negatif
   BY index host
-| eval moyenne_s=round(moyenne_s,1),
+| where delai_s=maximum_s
+| eval maximum_min=round(maximum_s/60,2),
+       moyenne_s=round(moyenne_s,1),
        p95_s=round(p95_s,1),
-       maximum_s=round(maximum_s,1),
-       pct_plus_5min=round(100*logs_plus_5min/nb_logs,2)
-| sort 30 - p95_s
+       pct_plus_5min=round(100*logs_plus_5min/nb_logs,2),
+       heure_log=strftime(_time,"%Y-%m-%d %H:%M:%S %z"),
+       heure_indexation=strftime(_indextime,"%Y-%m-%d %H:%M:%S %z")
+| sort 30 - maximum_s
+| table index host maximum_s maximum_min heure_log heure_indexation
+        source sourcetype nb_logs moyenne_s p95_s
+        pct_plus_5min logs_delai_negatif _raw
