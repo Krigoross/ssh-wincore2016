@@ -1,25 +1,15 @@
-| tstats summariesonly=false count
-    min(_time) as firstTime
-    max(_time) as lastTime
-  from datamodel=Endpoint.Processes
-  where earliest=-15m latest=now
-    (
-      Processes.parent_process_name="php*"
-      OR Processes.parent_process_name="apache2"
-      OR Processes.parent_process_name="httpd"
-    )
-    (
-      Processes.process_name IN (
-        "sh","bash","dash","ash","zsh","ksh",
-        "curl","wget","nc","ncat","netcat","socat",
-        "id","whoami","uname"
-      )
-      OR Processes.process_name="python*"
-      OR Processes.process_name="perl*"
-    )
-  by Processes.dest Processes.user
-     Processes.parent_process_name
-     Processes.process_name Processes.process
-| rename Processes.* AS *
-| convert ctime(firstTime) ctime(lastTime)
-| sort - lastTime
+index=MON_INDEX earliest=0 latest=now _index_earliest=-24h _index_latest=now
+| fields index host _time _indextime
+| eval delai_s=_indextime-_time
+| stats count AS nb_logs
+        avg(delai_s) AS moyenne_s
+        perc95(delai_s) AS p95_s
+        max(delai_s) AS maximum_s
+        count(eval(delai_s>300)) AS logs_plus_5min
+        count(eval(delai_s<0)) AS logs_delai_negatif
+  BY index host
+| eval moyenne_s=round(moyenne_s,1),
+       p95_s=round(p95_s,1),
+       maximum_s=round(maximum_s,1),
+       pct_plus_5min=round(100*logs_plus_5min/nb_logs,2)
+| sort 30 - p95_s
