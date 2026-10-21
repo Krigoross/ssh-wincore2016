@@ -8,12 +8,10 @@ index=_internal source=*splunkd.log* earliest=-24h latest=now
     match(_raw,"(?i)\bConnect to .*failed"),"echec"
   )
 | where isnotnull(resultat)
-| stats count(eval(resultat="reussite")) AS nb_reussites
-        count(eval(resultat="echec")) AS nb_echecs
-  BY host
-| eval groupe=if(nb_echecs>0,"Échec","Réussite uniquement")
-| stats count AS nb_hosts
-        values(host) AS hosts
-        sum(nb_reussites) AS nb_reussites
-        sum(nb_echecs) AS nb_echecs
-  BY groupe
+| rex field=_raw "(?i)\b(?:idx|ip|host_dest)=(?<destination>[^,\s;]+)"
+| eval destination=coalesce(destination,"Non extraite : voir exemple")
+| stats count(eval(resultat="reussite")) AS reussites
+        count(eval(resultat="echec")) AS echecs
+        latest(_raw) AS exemple
+  BY host destination
+| sort 0 - echecs
