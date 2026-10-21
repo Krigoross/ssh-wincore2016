@@ -1,13 +1,15 @@
-index=_internal source=*metrics.log* group=queue
-host="splunk-idx-01" name="parsingqueue"
-earliest=-24h latest=now
+index=_internal host="NOM_DU_PC" source=*metrics.log*
+group=queue earliest=-24h latest=now
 | eval remplissage_pct=case(
     max_size_kb>0,100*current_size_kb/max_size_kb,
     max_size>0,100*current_size/max_size
   )
-| timechart span=5m
-    avg(remplissage_pct) AS remplissage_moyen_pct
-    max(remplissage_pct) AS remplissage_max_pct
-    count AS nb_mesures
-    count(eval(blocked="true")) AS mesures_bloquees
-| eval pct_mesures_bloquees=round(100*mesures_bloquees/nb_mesures,1)
+| stats count AS nb_mesures
+        avg(remplissage_pct) AS remplissage_moyen_pct
+        max(remplissage_pct) AS remplissage_max_pct
+        count(eval(blocked="true")) AS mesures_bloquees
+  BY name
+| eval remplissage_moyen_pct=round(remplissage_moyen_pct,2),
+       remplissage_max_pct=round(remplissage_max_pct,2),
+       pct_mesures_bloquees=round(100*mesures_bloquees/nb_mesures,1)
+| sort 0 - mesures_bloquees
