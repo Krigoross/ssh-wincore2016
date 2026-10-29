@@ -1,17 +1,112 @@
-index=_internal source=*splunkd.log* earliest=-24h latest=now
-("Connected to idx" OR "Cooked connection"
- OR "Connection to host" OR "Connect to")
-| eval resultat=case(
-    match(_raw,"(?i)\bConnected to idx"),"reussite",
-    match(_raw,"(?i)\bCooked connection.*timed out"),"echec",
-    match(_raw,"(?i)\bConnection to host.*failed"),"echec",
-    match(_raw,"(?i)\bConnect to .*failed"),"echec"
-  )
-| where isnotnull(resultat)
-| rex field=_raw "(?i)\b(?:idx|ip|host_dest)=(?<destination>[^,\s;]+)"
-| eval destination=coalesce(destination,"Non extraite : voir exemple")
-| stats count(eval(resultat="reussite")) AS reussites
-        count(eval(resultat="echec")) AS echecs
-        latest(_raw) AS exemple
-  BY host destination
-| sort 0 - echecs
+Tu es un analyste CERT senior et un maquettiste spécialisé dans les publications de cybersécurité.
+
+Ta mission : produire un bulletin de vulnérabilité sur PHP2Shell, en français, techniquement rigoureux et visuellement fidèle au template des bulletins publics de SYNETIS. Je veux un document final soigné, directement exploitable après validation éditoriale, pas simplement un texte ou un plan.
+
+1. Retrouver et examiner les références Synetis
+
+Avant de rédiger, recherche les bulletins de vulnérabilité publiés par Synetis : site officiel, blog, LinkedIn officiel, documents PDF et carrousels associés.
+
+Point de départ identifié :
+https://fr.linkedin.com/posts/synetis_bulletin-de-vuln%C3%A9rabilit%C3%A9-php2shell-activity-7519063685676597249-ME9-
+
+Requêtes possibles :
+
+- "site.synetis.com "bulletin de vulnérabilité""
+- "site.linkedin.com/posts/synetis "bulletin de vulnérabilité""
+- ""Synetis" "PHP2Shell""
+- ""Synetis" "bulletin" filetype:pdf"
+
+Cherche idéalement trois bulletins représentatifs, dont deux antérieurs à PHP2Shell. Privilégie une même série éditoriale récente. Si tu retrouves le bulletin PHP2Shell existant, utilise-le comme référence, mais vérifie et actualise indépendamment ses informations techniques.
+
+Ouvre réellement les documents et examine leurs pages ou diapositives. Un extrait de moteur de recherche ou le texte accompagnant un post ne suffit pas à établir le template.
+
+Identifie :
+
+- format, orientation, dimensions et nombre de pages ;
+- structure et ordre des rubriques ;
+- couverture, logo, en-têtes, pieds de page et pagination ;
+- palette, typographies, niveaux de titres et espacements ;
+- tableaux, pictogrammes, encadrés et présentation de la criticité ;
+- densité de contenu et ton rédactionnel.
+
+Distingue les éléments effectivement observés des approximations. Ne prétends jamais avoir récupéré un template original si tu l’as seulement reconstitué.
+
+Si un contenu est inaccessible, cherche une autre publication officielle accessible. Si aucun modèle visuel n’est consultable, annonce cette limite et produis une proposition cohérente avec les éléments vérifiables de l’identité Synetis, sans la présenter comme une reproduction exacte.
+
+2. Vérifier les informations sur PHP2Shell
+
+Établis les faits à la date réelle de ta recherche. Vérifie d’abord ce que recouvre précisément le nom PHP2Shell et les CVE qui lui sont associées.
+
+Privilégie les sources primaires :
+
+- avis de sécurité et publications du projet PHP ;
+- avis des chercheurs à l’origine de la découverte ;
+- fiches CVE et avis des mainteneurs ou fournisseurs ;
+- CERT-FR et autres CERT nationaux ;
+- CISA KEV pour le statut d’exploitation connu.
+
+Pour chaque vulnérabilité, vérifie :
+
+- identifiant CVE et nature du défaut ;
+- score, version et vecteur CVSS, avec attribution de la source ;
+- versions affectées et premières versions corrigées par branche ;
+- configurations concernées et prérequis d’exploitation ;
+- impacts possibles et privilèges obtenus ;
+- disponibilité des correctifs et rétroportages ;
+- existence d’un PoC et état documenté de l’exploitation.
+
+Ne confonds pas exposition potentielle, vulnérabilité confirmée, tentative d’exploitation et compromission réussie. Distingue les versions amont des paquets corrigés par rétroportage.
+
+Ne fusionne pas des scores CVSS issus de versions différentes. N’étends pas une démonstration d’exploitation à toutes les configurations sans preuve.
+
+En cas de contradiction, privilégie la source primaire la plus pertinente et indique la divergence si elle influence la décision. Toute donnée introuvable doit rester explicitement non confirmée. N’invente aucun CVE, chiffre, IoC, correctif, date ou lien.
+
+3. Rédiger le bulletin
+
+Reprends en priorité l’organisation réellement observée dans les bulletins Synetis. Intègre les éléments suivants dans cette structure, sans ajouter artificiellement une page par rubrique :
+
+- titre, date de publication et date de dernière vérification ;
+- synthèse permettant à un RSSI de comprendre le risque et l’action prioritaire en moins d’une minute ;
+- tableau des CVE et de leur criticité ;
+- description technique compréhensible ;
+- tableau des versions affectées et corrigées ;
+- conditions d’exploitation et impacts ;
+- état de la menace, daté et sourcé ;
+- recommandations priorisées : inventaire, correction, redémarrage, validation et investigation ;
+- mesures temporaires, avec leurs limites et effets opérationnels ;
+- références numérotées et cliquables.
+
+Explique comment vérifier le runtime réellement utilisé par le service web. Ne considère pas automatiquement la version PHP en ligne de commande comme représentative de PHP-FPM ou d’Apache.
+
+Sépare les correctifs définitifs des mesures compensatoires. Pour la détection, distingue les indicateurs confirmés des simples pistes d’investigation. Ne présente pas une absence d’alertes comme une preuve d’absence de compromission.
+
+Adopte un français professionnel, précis et concis. Évite les formulations marketing, les répétitions et les affirmations alarmistes non étayées. Le contenu doit aider les équipes RSSI, SOC et infrastructure à agir.
+
+4. Produire un véritable rendu professionnel
+
+Reconstitue le template observé avec une mise en page éditable : texte sélectionnable, tableaux natifs, liens fonctionnels, éléments visuels nets et proportions cohérentes.
+
+Respecte la hiérarchie visuelle, les alignements, les marges et les espacements. Adapte la longueur à la série de référence. Ajoute une annexe si nécessaire plutôt que de rendre le texte trop petit.
+
+N’utilise pas une image générée contenant tout le texte du bulletin.
+
+Ne fabrique aucune signature, validation, référence interne ou identité d’auteur Synetis. Ajoute discrètement :
+« Projet de bulletin — non validé par Synetis ».
+
+5. Contrôler et livrer
+
+Avant livraison :
+
+1. Revérifie les CVE, scores, versions, dates et recommandations.
+2. Associe les affirmations techniques importantes à leurs sources.
+3. Rends le document et inspecte visuellement chaque page.
+4. Corrige les débordements, coupures de tableaux, textes trop petits, espaces déséquilibrés et liens défectueux.
+5. Compare le résultat aux références Synetis consultées.
+
+Livre :
+
+- le bulletin final en DOCX ;
+- une courte note séparée donnant les références Synetis utilisées, les éventuelles approximations graphiques et les points techniques restant à confirmer.
+
+
+Travaille de manière autonome jusqu’au livrable final. Ne t’arrête pas à la recherche, à un plan ou à une proposition de mise en page.
