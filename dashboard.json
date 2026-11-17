@@ -1,51 +1,46 @@
-let duree = 30d;
-let pj = (
+let duree = 2d;
+let pj_eml =
     EmailAttachmentInfo
     | where Timestamp > ago(duree)
     | where FileName endswith ".eml"
     | extend Destinataire = tostring(split(RecipientEmailAddress, "@")[0])
     | where FileName =~ strcat(Destinataire, ".eml")
         or FileName =~ strcat(RecipientEmailAddress, ".eml")
-    | summarize nompj = make_set(FileName), hash = make_set(SHA256)
-        by NetworkMessageId, RecipientEmailAddress
-);
-let mails = materialize(
+    | summarize
+        nompj = make_set(FileName),
+        hash = make_set(SHA256)
+        by NetworkMessageId, RecipientEmailAddress;
+let pj_jpeg =
+    EmailAttachmentInfo
+    | where Timestamp > ago(duree)
+    | where FileType in~ ("jpeg", "jpg", "image/jpeg", "image/jpg")
+    | summarize
+        Pieces_jointes_JPEG = make_set(FileName),
+        Types_JPEG = make_set(FileType),
+        Hash_JPEG = make_set(SHA256)
+        by NetworkMessageId, RecipientEmailAddress;
+pj_eml
+| join kind=inner pj_jpeg on NetworkMessageId, RecipientEmailAddress
+| join kind=leftouter (
     EmailEvents
     | where Timestamp > ago(duree)
     | summarize arg_max(Timestamp, *)
         by NetworkMessageId, RecipientEmailAddress
-);
-let initiaux = materialize(
-    pj
-    | join kind=inner mails on NetworkMessageId, RecipientEmailAddress
-);
-let ipv4 = (
-    initiaux
-    | where isnotempty(SenderIPv4)
-    | distinct SenderIPv4
-);
-let ipv6 = (
-    initiaux
-    | where isnotempty(SenderIPv6)
-    | distinct SenderIPv6
-);
-mails
-| where SenderIPv4 in (ipv4) or SenderIPv6 in (ipv6)
-| join kind=leftouter (
-    EmailAttachmentInfo
-    | where Timestamp > ago(duree)
-    | summarize nompj = make_set(FileName), hash = make_set(SHA256)
-        by NetworkMessageId, RecipientEmailAddress
 ) on NetworkMessageId, RecipientEmailAddress
 | project
-    DateReception = Timestamp,
-    Titre = Subject,
-    Destinataire = RecipientEmailAddress,
-    Expediteur = SenderFromAddress,
-    IPSenderIPv4 = SenderIPv4,
-    IPSenderIPv6 = SenderIPv6,
-    NomPJ = nompj,
-    EmplacementLivraison = DeliveryLocation,
-    ActionLivraison = DeliveryAction,
-    EmplacementActuel = LatestDeliveryLocation
-| order by DateReception desc
+    Timestamp,
+    Subject,
+    RecipientEmailAddress,
+    Sender = SenderMailFromAddress,
+    Piece_jointe = nompj,
+    Pieces_jointes_JPEG,
+    Types_JPEG,
+    DeliveryLocation,
+    DeliveryAction,
+    LatestDeliveryLocation,
+    SenderIPv4,
+    SenderIPv6,
+    hash,
+    Hash_JPEG,
+    NetworkMessageId
+| order by Timestamp desc
