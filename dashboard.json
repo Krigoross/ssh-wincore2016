@@ -1,606 +1,115 @@
-{
-  "title": "SOC | Contexte de l’entité",
-  "description": "V9 — contexte d’entité sur les bornes du premier drilldown lorsqu’un finding est sélectionné ; sinon période d’investigation. Pas de fenêtre centrée sur _time. Repli explicite si bornes indisponibles.",
-  "inputs": {
-    "input_kind": {
-      "type": "input.dropdown",
-      "title": "Type d’entité",
-      "options": {
-        "token": "entity_kind",
-        "defaultValue": "machine",
-        "items": [
-          {
-            "label": "Poste / machine",
-            "value": "machine"
-          },
-          {
-            "label": "Utilisateur",
-            "value": "user"
-          },
-          {
-            "label": "Adresse IP",
-            "value": "ip"
-          }
-        ]
-      }
-    },
-    "input_entity": {
-      "type": "input.text",
-      "title": "Entité — aliases facultatifs séparés par « ; »",
-      "options": {
-        "token": "entity",
-        "defaultValue": "__RENSEIGNER__"
-      }
-    },
-    "input_time": {
-      "type": "input.timerange",
-      "title": "Période d’investigation",
-      "options": {
-        "token": "global_time",
-        "defaultValue": "-4h,now"
-      }
-    },
-    "input_reset": {
-      "type": "input.button",
-      "options": {
-        "label": "Revenir à la période d’investigation"
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "focus_id",
-                "value": "none"
-              },
-              {
-                "token": "focus_begin",
-                "value": "0"
-              },
-              {
-                "token": "focus_end",
-                "value": "0"
-              },
-              {
-                "token": "focus_dd_valid",
-                "value": "no"
-              },
-              {
-                "token": "focus_dd_name",
-                "value": "-"
-              },
-              {
-                "token": "focus_entity",
-                "value": "-"
-              },
-              {
-                "token": "focus_kind",
-                "value": "-"
-              }
-            ]
-          }
-        }
-      ]
-    }
-  },
-  "dataSources": {
-    "ds_entity_filter": {
-      "type": "ds.search",
-      "name": "Entité saisie",
-      "options": {
-        "query": "| makeresults\n| eval entite=$entity|s$, type_entite=$entity_kind|s$\n| eval valeurs=split(entite,\";\")\n| eval statut=case(entite=\"__RENSEIGNER__\" OR len(trim(entite))=0,\"Saisir une entité\",match(entite,\"[*?]\"),\"Saisir une valeur exacte sans joker\",true(),\"Prêt\")\n| table entite type_entite valeurs statut",
-        "queryParameters": {
-          "earliest": "-1m",
-          "latest": "now"
-        }
-      }
-    },
-    "ds_scope": {
-      "type": "ds.search",
-      "name": "Période affichée",
-      "options": {
-        "query": "| makeresults\n| eval entite=$entity|s$, selected_id=$focus_id|s$, selected_entity=$focus_entity|s$, selected_kind=$focus_kind|s$, kind=$entity_kind|s$, dd_valid=$focus_dd_valid|s$, dd_name=$focus_dd_name|s$, active_begin=\"$eval:activeEarliest$\", active_end=\"$eval:activeLatest$\"\n| eval active_begin_number=tonumber(active_begin), active_end_number=tonumber(active_end)\n| eval begin_epoch=case(isnotnull(active_begin_number),active_begin_number,true(),relative_time(now(),active_begin)), end_epoch=case(active_end=\"now\",now(),isnotnull(active_end_number),active_end_number,true(),relative_time(now(),active_end))\n| eval finding_selected=if(selected_id!=\"none\" AND selected_entity=entite AND selected_kind=kind,1,0)\n| eval mode=case(finding_selected=1 AND dd_valid=\"yes\",\"Période du drilldown associé\",finding_selected=1,\"Drilldown sans période exploitable : période d’investigation\",true(),\"Période d’investigation\"), finding=if(finding_selected=1,selected_id,\"Aucun — sélection facultative\"), drilldown=if(finding_selected=1,dd_name,\"—\"), debut=strftime(begin_epoch,\"%Y-%m-%d %H:%M:%S %Z\"), fin=strftime(end_epoch,\"%Y-%m-%d %H:%M:%S %Z\"), statut=if(isnotnull(begin_epoch) AND isnotnull(end_epoch) AND end_epoch>begin_epoch,\"Prêt\",\"Période invalide\")\n| table entite mode finding drilldown debut fin statut",
-        "queryParameters": {
-          "earliest": "-1m",
-          "latest": "now"
-        }
-      }
-    },
-    "ds_summary": {
-      "type": "ds.search",
-      "name": "Volume de l’activité",
-      "options": {
-        "query": "index=* NOT index=notable NOT index=risk [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n]\n| stats count AS evenements dc(sourcetype) AS types_logs dc(index) AS indexes min(_time) AS premiere_observation max(_time) AS derniere_observation\n| convert ctime(premiere_observation) ctime(derniere_observation)",
-        "queryParameters": {
-          "earliest": "$eval:activeEarliest$",
-          "latest": "$eval:activeLatest$"
-        }
-      }
-    },
-    "ds_trend": {
-      "type": "ds.search",
-      "name": "Chronologie de l’activité",
-      "options": {
-        "query": "index=* NOT index=notable NOT index=risk [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n]\n| timechart span=5m count BY sourcetype limit=8 useother=true",
-        "queryParameters": {
-          "earliest": "$eval:activeEarliest$",
-          "latest": "$eval:activeLatest$"
-        }
-      }
-    },
-    "ds_all": {
-      "type": "ds.search",
-      "name": "Événements de l’entité",
-      "options": {
-        "query": "index=* NOT index=notable NOT index=risk [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n]\n| sort 1000 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure index sourcetype host user src dest dvc action process_name process _raw",
-        "queryParameters": {
-          "earliest": "$eval:activeEarliest$",
-          "latest": "$eval:activeLatest$"
-        }
-      }
-    },
-    "ds_auth": {
-      "type": "ds.search",
-      "name": "Authentifications de l’entité",
-      "options": {
-        "query": "index=* NOT index=notable NOT index=risk [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n] tag=authentication\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src dest action app signature authentication_method sourcetype _raw",
-        "queryParameters": {
-          "earliest": "$eval:activeEarliest$",
-          "latest": "$eval:activeLatest$"
-        }
-      }
-    },
-    "ds_process": {
-      "type": "ds.search",
-      "name": "Processus de l’entité",
-      "options": {
-        "query": "index=* NOT index=notable NOT index=risk [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n] tag=process tag=report\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| eval commande=coalesce(process,process_command_line,CommandLine), pid=coalesce(process_id,ProcessId,ProcessID), parent_pid=coalesce(parent_process_id,ParentProcessId), guid=coalesce(process_guid,ProcessGuid), parent_guid=coalesce(parent_process_guid,ParentProcessGuid)\n| table heure host dest user process_name commande parent_process_name pid parent_pid guid parent_guid sourcetype _raw",
-        "queryParameters": {
-          "earliest": "$eval:activeEarliest$",
-          "latest": "$eval:activeLatest$"
-        }
-      }
-    },
-    "ds_network": {
-      "type": "ds.search",
-      "name": "Communications de l’entité",
-      "options": {
-        "query": "index=* NOT index=notable NOT index=risk [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n] tag=network tag=communicate\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src src_port dest dest_port transport action bytes_in bytes_out process_guid sourcetype _raw",
-        "queryParameters": {
-          "earliest": "$eval:activeEarliest$",
-          "latest": "$eval:activeLatest$"
-        }
-      }
-    },
-    "ds_dns_web": {
-      "type": "ds.search",
-      "name": "DNS et Web de l’entité",
-      "options": {
-        "query": "index=* NOT index=notable NOT index=risk [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n] (tag=dns OR tag=web)\n| sort 500 - _time\n| eval heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\")\n| table heure host user src dest query answer url http_method status sourcetype _raw",
-        "queryParameters": {
-          "earliest": "$eval:activeEarliest$",
-          "latest": "$eval:activeLatest$"
-        }
-      }
-    },
-    "ds_findings": {
-      "type": "ds.search",
-      "name": "Findings facultatifs de l’entité",
-      "options": {
-        "query": "index=notable [\n| makeresults\n| eval principal=$entity|s$, kind=$entity_kind|s$\n| where len(trim(principal))>0 AND principal!=\"__RENSEIGNER__\" AND NOT match(principal,\"[*?]\")\n| eval value=split(principal,\";\")\n| mvexpand value\n| eval value=trim(value)\n| where len(value)>0\n| eval keys=case(kind=\"machine\",split(\"host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object\",\",\"),kind=\"user\",split(\"user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name,risk_object\",\",\"),kind=\"ip\",split(\"src,dest,src_ip,dest_ip,dvc,dvc_ip,risk_object\",\",\"))\n| mvexpand keys\n| eval {keys}=value\n| fields host,dest,src,dvc,Computer,ComputerName,src_host,dest_host,src_nt_host,dest_nt_host,orig_host,src_ip,dest_ip,dvc_ip,risk_object,user,src_user,dest_user,Account_Name,TargetUserName,SubjectUserName,user_name\n| format mvsep=\"OR\" emptystr=\"(1=0)\"\n]\n| sort 100 - _time\n| lookup correlationsearches_lookup _key AS source OUTPUTNEW drilldown_searches drilldown_search drilldown_name drilldown_earliest_offset drilldown_latest_offset\n| spath input=drilldown_searches path={} output=dd_array\n| eval dd_object=coalesce(mvindex(dd_array,0),mvindex(drilldown_searches,0))\n| spath input=dd_object path=name output=dd_json_name\n| spath input=dd_object path=search output=dd_json_search\n| spath input=dd_object path=earliest_offset output=dd_json_eoffset\n| spath input=dd_object path=latest_offset output=dd_json_loffset\n| spath input=dd_object path=earliest output=dd_json_earliest\n| spath input=dd_object path=latest output=dd_json_latest\n| eval dd_name=coalesce(dd_json_name,drilldown_name,\"Première recherche associée\"), dd_search=coalesce(dd_json_search,drilldown_search), dd_e=coalesce(dd_json_earliest,dd_json_eoffset,drilldown_earliest_offset), dd_l=coalesce(dd_json_latest,dd_json_loffset,drilldown_latest_offset)\n| eval dd_e=trim(tostring(mvindex(dd_e,0))), dd_l=trim(tostring(mvindex(dd_l,0))), info_min_text=trim(tostring(mvindex(info_min_time,0))), info_max_text=trim(tostring(mvindex(info_max_time,0))), dd_e_raw=dd_e, dd_l_raw=dd_l\n| expandtoken dd_e,dd_l,dd_name\n| eval dd_e=trim(tostring(mvindex(dd_e,0))), dd_l=trim(tostring(mvindex(dd_l,0)))\n| eval dd_e_number=tonumber(dd_e), dd_l_number=tonumber(dd_l), info_min_number=tonumber(info_min_text), info_max_number=tonumber(info_max_text)\n| eval dd_begin=case(isnotnull(dd_json_earliest) AND isnotnull(dd_e_number),dd_e_number,isnotnull(dd_json_earliest) AND match(dd_e,\"^-\"),relative_time(now(),dd_e),like(dd_e_raw,\"%info_min_time%\"),info_min_number,match(dd_e_raw,\"^[0-9]+$\"),_time-dd_e_number,match(dd_e_raw,\"^[0-9]+[smhdw]$\"),relative_time(_time,\"-\".dd_e),isnotnull(dd_e_number),dd_e_number,true(),null()), dd_end=case(isnotnull(dd_json_latest) AND isnotnull(dd_l_number),dd_l_number,dd_l=\"now\",now(),like(dd_l_raw,\"%info_max_time%\"),info_max_number,match(dd_l_raw,\"^[0-9]+$\"),_time+dd_l_number,match(dd_l_raw,\"^[0-9]+[smhdw]$\"),relative_time(_time,\"+\".dd_l),isnotnull(dd_l_number),dd_l_number,true(),null())\n| eval periode_drilldown=case(isnull(dd_search) OR len(trim(dd_search))=0,\"Aucun drilldown associé\",isnull(dd_begin) OR isnull(dd_end) OR dd_begin<0 OR dd_end<=dd_begin,\"Bornes indisponibles : période d’investigation conservée\",true(),\"Période du drilldown disponible\")\n| eval _dd_valid=if(periode_drilldown=\"Période du drilldown disponible\",\"yes\",\"no\"), _dd_start=if(_dd_valid=\"yes\",dd_begin,0), _dd_end=if(_dd_valid=\"yes\",dd_end,0), debut_drilldown=if(_dd_valid=\"yes\",strftime(dd_begin,\"%Y-%m-%d %H:%M:%S %Z\"),\"—\"), fin_drilldown=if(_dd_valid=\"yes\",strftime(dd_end,\"%Y-%m-%d %H:%M:%S %Z\"),\"—\"), _dd_name=if(isnull(dd_name) OR dd_name=\"\",\"-\",dd_name)\n| eval finding_id=coalesce(event_id,notable_event_id,md5(_raw.tostring(_time))), detection=coalesce(rule_title,rule_name,search_name,source,\"(non renseignée)\"), heure=strftime(_time,\"%Y-%m-%d %H:%M:%S %Z\"), _focus_entity=$entity|s$, _focus_kind=$entity_kind|s$\n| table heure detection severity finding_id periode_drilldown debut_drilldown fin_drilldown user src dest dvc risk_object _dd_start _dd_end _dd_valid _dd_name _focus_entity _focus_kind",
-        "queryParameters": {
-          "earliest": "$global_time.earliest$",
-          "latest": "$global_time.latest$"
-        }
-      }
-    }
-  },
-  "visualizations": {
-    "viz_intro": {
-      "type": "splunk.markdown",
-      "title": "",
-      "options": {
-        "markdown": "# Contexte de l’entité\nSaisir une entité, choisir la période puis **Submit**. Sans finding sélectionné, l’activité utilise cette période. Cliquer sur un finding applique la **période de son premier drilldown associé**, sans fenêtre ajoutée autour du finding. Les colonnes de la liste montrent les bornes résolues. Le bouton ci-dessous restaure la période d’investigation."
-      }
-    },
-    "viz_scope": {
-      "type": "splunk.table",
-      "title": "Période réellement utilisée",
-      "options": {
-        "showInternalFields": false
-      },
-      "dataSources": {
-        "primary": "ds_scope"
-      }
-    },
-    "viz_findings": {
-      "type": "splunk.table",
-      "title": "Findings associés — sélection facultative",
-      "options": {
-        "showInternalFields": false
-      },
-      "dataSources": {
-        "primary": "ds_findings"
-      },
-      "description": "Liste sur la période d’investigation. Cliquer sur un finding pour appliquer les bornes de son premier drilldown à tous les panneaux d’activité.",
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "focus_id",
-                "key": "row.finding_id.value"
-              },
-              {
-                "token": "focus_begin",
-                "key": "row._dd_start.value"
-              },
-              {
-                "token": "focus_end",
-                "key": "row._dd_end.value"
-              },
-              {
-                "token": "focus_dd_valid",
-                "key": "row._dd_valid.value"
-              },
-              {
-                "token": "focus_dd_name",
-                "key": "row._dd_name.value"
-              },
-              {
-                "token": "focus_entity",
-                "key": "row._focus_entity.value"
-              },
-              {
-                "token": "focus_kind",
-                "key": "row._focus_kind.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
-    "viz_summary": {
-      "type": "splunk.table",
-      "title": "Volume de l’activité — période active",
-      "options": {},
-      "dataSources": {
-        "primary": "ds_summary"
-      },
-      "description": "Comptage de tous les événements correspondant aux champs d’entité, avant plafonnement des tables."
-    },
-    "viz_trend": {
-      "type": "splunk.line",
-      "title": "Chronologie par type de log",
-      "options": {},
-      "dataSources": {
-        "primary": "ds_trend"
-      },
-      "description": "Tranches de 5 minutes ; les types minoritaires sont regroupés dans OTHER."
-    },
-    "viz_auth": {
-      "type": "splunk.table",
-      "title": "Authentifications / logins",
-      "options": {
-        "showInternalFields": true
-      },
-      "dataSources": {
-        "primary": "ds_auth"
-      },
-      "description": "500 événements les plus récents. Tags CIM Authentication nécessaires.",
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_process": {
-      "type": "splunk.table",
-      "title": "Processus et lignes de commande",
-      "options": {
-        "showInternalFields": true
-      },
-      "dataSources": {
-        "primary": "ds_process"
-      },
-      "description": "500 événements les plus récents. Le GUID est affiché s’il existe, sans conditionner la recherche.",
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_network": {
-      "type": "splunk.table",
-      "title": "Communications réseau",
-      "options": {
-        "showInternalFields": true
-      },
-      "dataSources": {
-        "primary": "ds_network"
-      },
-      "description": "500 événements les plus récents. Si les logs ne contiennent que l’IP du poste, ajouter cette IP au champ Entité, par exemple PC01;10.0.0.8.",
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_dns_web": {
-      "type": "splunk.table",
-      "title": "DNS et Web",
-      "options": {
-        "showInternalFields": true
-      },
-      "dataSources": {
-        "primary": "ds_dns_web"
-      },
-      "description": "500 événements les plus récents ; tags DNS/Web nécessaires.",
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_all": {
-      "type": "splunk.table",
-      "title": "Événements bruts — toutes les sources correspondantes",
-      "options": {
-        "showInternalFields": true
-      },
-      "dataSources": {
-        "primary": "ds_all"
-      },
-      "description": "1000 événements les plus récents, sans restriction de type de log. _raw contient le message original. Les tables spécialisées sont des vues complémentaires.",
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_notes": {
-      "type": "splunk.markdown",
-      "title": "",
-      "options": {
-        "markdown": "**Période** : finding absent → période d’investigation ; finding sélectionné → bornes de son premier drilldown. Les offsets configurés et les paramètres info_min_time/info_max_time sont résolus avec les champs du finding. La liste des findings garde la période du sélecteur. Bornes absentes ou invalides : repli sur la période d’investigation, signalé en haut. La période correspond aux métadonnées du drilldown ; les directives temporelles intégrées dans un SPL personnalisé ne sont pas interprétées ici. Lookup correlationsearches_lookup et commande expandtoken ES doivent être accessibles dans l’application du dashboard. Les panneaux d’activité restent indépendants. Aliases : hostname;FQDN;IP. Tags CIM pour les vues spécialisées ; tous types dans la vue brute. 500 événements par catégorie, 1000 bruts."
-      }
-    },
-    "viz_entity_filter": {
-      "type": "splunk.table",
-      "title": "Entité recherchée",
-      "options": {
-        "showInternalFields": false
-      },
-      "dataSources": {
-        "primary": "ds_entity_filter"
-      }
-    }
-  },
-  "defaults": {
-    "tokens": {
-      "default": {
-        "focus_id": {
-          "value": "none"
-        },
-        "focus_entity": {
-          "value": "-"
-        },
-        "focus_kind": {
-          "value": "-"
-        },
-        "focus_begin": {
-          "value": "0"
-        },
-        "focus_end": {
-          "value": "0"
-        },
-        "focus_dd_valid": {
-          "value": "no"
-        },
-        "focus_dd_name": {
-          "value": "-"
-        }
-      }
-    },
-    "visualizations": {
-      "global": {
-        "showProgressBar": true
-      }
-    }
-  },
-  "layout": {
-    "globalInputs": [
-      "input_kind",
-      "input_entity",
-      "input_time"
-    ],
-    "options": {
-      "submitButton": true,
-      "submitOnDashboardLoad": false
-    },
-    "tabs": {
-      "items": [
-        {
-          "layoutId": "layout_context",
-          "label": "Investigation"
-        }
-      ]
-    },
-    "layoutDefinitions": {
-      "layout_context": {
-        "type": "absolute",
-        "options": {
-          "width": 1440,
-          "height": 3215,
-          "display": "auto-scale"
-        },
-        "structure": [
-          {
-            "item": "viz_intro",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 15,
-              "w": 1400,
-              "h": 110
-            }
-          },
-          {
-            "item": "input_reset",
-            "type": "input",
-            "position": {
-              "x": 20,
-              "y": 140,
-              "w": 410,
-              "h": 70
-            }
-          },
-          {
-            "item": "viz_scope",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 355,
-              "w": 1400,
-              "h": 110
-            }
-          },
-          {
-            "item": "viz_findings",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 485,
-              "w": 1400,
-              "h": 245
-            }
-          },
-          {
-            "item": "viz_summary",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 750,
-              "w": 1400,
-              "h": 105
-            }
-          },
-          {
-            "item": "viz_trend",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 875,
-              "w": 1400,
-              "h": 230
-            }
-          },
-          {
-            "item": "viz_auth",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 1125,
-              "w": 1400,
-              "h": 285
-            }
-          },
-          {
-            "item": "viz_process",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 1430,
-              "w": 1400,
-              "h": 300
-            }
-          },
-          {
-            "item": "viz_network",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 1750,
-              "w": 1400,
-              "h": 285
-            }
-          },
-          {
-            "item": "viz_dns_web",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 2055,
-              "w": 1400,
-              "h": 260
-            }
-          },
-          {
-            "item": "viz_all",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 2335,
-              "w": 1400,
-              "h": 550
-            }
-          },
-          {
-            "item": "viz_notes",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 2905,
-              "w": 1400,
-              "h": 270
-            }
-          },
-          {
-            "item": "viz_entity_filter",
-            "type": "block",
-            "position": {
-              "x": 20,
-              "y": 230,
-              "w": 1400,
-              "h": 105
-            }
-          }
-        ]
-      }
-    }
-  },
-  "expressions": {
-    "eval": {
-      "eval_active_begin": {
-        "name": "activeEarliest",
-        "value": "($focus_id$ != 'none' and $focus_dd_valid$ = 'yes' and $number($focus_end$) > $number($focus_begin$) and $focus_entity$ = $entity$ and $focus_kind$ = $entity_kind$) ? $string($number($focus_begin$)) : $global_time.earliest$"
-      },
-      "eval_active_end": {
-        "name": "activeLatest",
-        "value": "($focus_id$ != 'none' and $focus_dd_valid$ = 'yes' and $number($focus_end$) > $number($focus_begin$) and $focus_entity$ = $entity$ and $focus_kind$ = $entity_kind$) ? $string($number($focus_end$)) : $global_time.latest$"
-      }
-    }
-  }
-}
+let Target = "utilisateur@entreprise.fr";
+let Lookback = 14d;
+
+// Ignore casse, chiffres, ponctuation et espaces.
+// Exemple : Facture_2026-123.pdf -> facturepdf
+let Normalize = (s:string) {
+    replace_regex(tolower(s), @"[\W_0-9]+", "")
+};
+
+let Reported = (
+    AlertEvidence
+    | where Timestamp > ago(Lookback)
+    | where Title =~ "Email reported by user as malware or phish"
+    | where isnotempty(NetworkMessageId)
+    | distinct NetworkMessageId
+);
+
+let Mail = materialize(
+    EmailEvents
+    | where Timestamp > ago(Lookback)
+    | summarize arg_max(Timestamp, *)
+        by NetworkMessageId, RecipientEmailAddress
+    | project Timestamp, NetworkMessageId, RecipientEmailAddress,
+              Subject, SenderFromAddress, EmailClusterId,
+              DeliveryAction, DeliveryLocation, LatestDeliveryLocation
+);
+
+let Seeds = materialize(
+    Mail
+    | where DeliveryLocation == "Quarantine"
+        or NetworkMessageId in (Reported)
+    | extend SeedReason = iff(
+        NetworkMessageId in (Reported),
+        "Signalement utilisateur",
+        "Quarantaine à la livraison")
+    | project SeedId = NetworkMessageId,
+              SeedRecipient = RecipientEmailAddress,
+              SeedSubject = Subject, SeedReason
+);
+
+let Targets = materialize(
+    Mail
+    | where RecipientEmailAddress =~ Target
+    | where DeliveryAction in ("Delivered", "Junked")
+);
+
+let RelevantIds = (
+    union
+        (Seeds | project NetworkMessageId = SeedId),
+        (Targets | project NetworkMessageId)
+    | distinct NetworkMessageId
+);
+
+// Une clé par critère de rapprochement.
+let Keys = materialize(
+    union
+        (
+            Mail
+            | where NetworkMessageId in (RelevantIds)
+            | where isnotnull(EmailClusterId) and EmailClusterId != 0
+            | project NetworkMessageId,
+                      MatchType = "Cluster Microsoft",
+                      MatchKey = tostring(EmailClusterId)
+        ),
+        (
+            Mail
+            | where NetworkMessageId in (RelevantIds)
+            | extend MatchKey = Normalize(Subject)
+            | where strlen(MatchKey) >= 8
+            | project NetworkMessageId,
+                      MatchType = "Objet normalisé", MatchKey
+        ),
+        (
+            EmailAttachmentInfo
+            | where Timestamp > ago(Lookback)
+            | where NetworkMessageId in (RelevantIds)
+            | extend MatchKey = Normalize(FileName)
+            | where strlen(MatchKey) >= 8
+            | project NetworkMessageId,
+                      MatchType = "Nom PJ normalisé", MatchKey
+        ),
+        (
+            EmailUrlInfo
+            | where Timestamp > ago(Lookback)
+            | where NetworkMessageId in (RelevantIds)
+            | extend MatchKey = tolower(UrlDomain)
+            | where isnotempty(MatchKey)
+            | project NetworkMessageId,
+                      MatchType = "Domaine URL", MatchKey
+        )
+    | distinct NetworkMessageId, MatchType, MatchKey
+);
+
+let SeedKeys = (
+    Keys
+    | join kind=inner Seeds
+        on $left.NetworkMessageId == $right.SeedId
+    | project MatchType, MatchKey,
+              SeedId, SeedRecipient, SeedSubject, SeedReason
+);
+
+Targets
+| join kind=inner Keys on NetworkMessageId
+| join kind=inner SeedKeys on MatchType, MatchKey
+// Évite de comparer la même copie à elle-même.
+| where NetworkMessageId != SeedId
+    or RecipientEmailAddress !~ SeedRecipient
+| summarize
+    MatchTypes = make_set(MatchType),
+    MatchedValues = make_set(MatchKey)
+    by Timestamp, NetworkMessageId, RecipientEmailAddress,
+       Subject, SenderFromAddress, LatestDeliveryLocation,
+       SeedId, SeedRecipient, SeedSubject, SeedReason
+| extend MatchingCriteria = array_length(MatchTypes)
+| order by MatchingCriteria desc, Timestamp desc
