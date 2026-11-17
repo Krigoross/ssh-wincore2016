@@ -4,17 +4,17 @@ EmailAttachmentInfo
 | extend
     EstEML = FileName endswith ".eml"
         or FileType in~ ("eml", "message/rfc822"),
-    EstJPEG = FileType in~ ("jpeg", "jpg", "image/jpeg", "image/jpg")
-        and FileName =~ "ATT00004"
+    EstATT = FileName =~ "ATT00004"
 | summarize
     NombreEML = countif(EstEML),
-    NombreJPEG = countif(EstJPEG),
+    NombreATT = countif(EstATT),
     Pieces_jointes_EML = make_set_if(FileName, EstEML),
-    Pieces_jointes_JPEG = make_set_if(FileName, EstJPEG),
+    Pieces_jointes_ATT = make_set_if(FileName, EstATT),
+    Types_ATT = make_set_if(FileType, EstATT),
     Hash_EML = make_set_if(SHA256, EstEML),
-    Hash_JPEG = make_set_if(SHA256, EstJPEG)
+    Hash_ATT = make_set_if(SHA256, EstATT)
     by NetworkMessageId, RecipientEmailAddress
-| where NombreEML > 0 and NombreJPEG > 0
+| where NombreEML > 0 and NombreATT > 0
 | join kind=leftouter (
     EmailEvents
     | where Timestamp > ago(duree)
@@ -27,7 +27,8 @@ EmailAttachmentInfo
     RecipientEmailAddress,
     Sender = SenderMailFromAddress,
     Pieces_jointes_EML,
-    Pieces_jointes_JPEG,
+    Pieces_jointes_ATT,
+    Types_ATT,
     DeliveryLocation,
     DeliveryAction,
     LatestDeliveryLocation,
@@ -36,6 +37,6 @@ EmailAttachmentInfo
     SenderIPv4,
     SenderIPv6,
     Hash_EML,
-    Hash_JPEG,
+    Hash_ATT,
     NetworkMessageId
 | order by Timestamp desc
