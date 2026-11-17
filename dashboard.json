@@ -1,26 +1,20 @@
 let duree = 2d;
-let pj_eml =
-    EmailAttachmentInfo
-    | where Timestamp > ago(duree)
-    | where FileName endswith ".eml"
-    | extend Destinataire = tostring(split(RecipientEmailAddress, "@")[0])
-    | where FileName =~ strcat(Destinataire, ".eml")
-        or FileName =~ strcat(RecipientEmailAddress, ".eml")
-    | summarize
-        nompj = make_set(FileName),
-        hash = make_set(SHA256)
-        by NetworkMessageId, RecipientEmailAddress;
-let pj_jpeg =
-    EmailAttachmentInfo
-    | where Timestamp > ago(duree)
-    | where FileType in~ ("jpeg", "jpg", "image/jpeg", "image/jpg")
-    | summarize
-        Pieces_jointes_JPEG = make_set(FileName),
-        Types_JPEG = make_set(FileType),
-        Hash_JPEG = make_set(SHA256)
-        by NetworkMessageId, RecipientEmailAddress;
-pj_eml
-| join kind=inner pj_jpeg on NetworkMessageId, RecipientEmailAddress
+EmailAttachmentInfo
+| where Timestamp > ago(duree)
+| extend
+    EstEML = FileName endswith ".eml"
+        or FileType in~ ("eml", "message/rfc822"),
+    EstJPEG = FileType in~ ("jpeg", "jpg", "image/jpeg", "image/jpg")
+        and FileName =~ "ATT00004"
+| summarize
+    NombreEML = countif(EstEML),
+    NombreJPEG = countif(EstJPEG),
+    Pieces_jointes_EML = make_set_if(FileName, EstEML),
+    Pieces_jointes_JPEG = make_set_if(FileName, EstJPEG),
+    Hash_EML = make_set_if(SHA256, EstEML),
+    Hash_JPEG = make_set_if(SHA256, EstJPEG)
+    by NetworkMessageId, RecipientEmailAddress
+| where NombreEML > 0 and NombreJPEG > 0
 | join kind=leftouter (
     EmailEvents
     | where Timestamp > ago(duree)
@@ -32,15 +26,16 @@ pj_eml
     Subject,
     RecipientEmailAddress,
     Sender = SenderMailFromAddress,
-    Piece_jointe = nompj,
+    Pieces_jointes_EML,
     Pieces_jointes_JPEG,
-    Types_JPEG,
     DeliveryLocation,
     DeliveryAction,
     LatestDeliveryLocation,
+    ThreatTypes,
+    DetectionMethods,
     SenderIPv4,
     SenderIPv6,
-    hash,
+    Hash_EML,
     Hash_JPEG,
     NetworkMessageId
 | order by Timestamp desc
