@@ -1,12 +1,13 @@
 let Target = "utilisateur@entreprise.fr";
 let Lookback = 14d;
 
-// Ignore casse, chiffres, ponctuation et espaces.
+// Normalisation : ignore casse, chiffres, ponctuation et espaces.
 // Exemple : Facture_2026-123.pdf -> facturepdf
 let Normalize = (s:string) {
     replace_regex(tolower(s), @"[\W_0-9]+", "")
 };
 
+// Messages associés à une alerte de signalement utilisateur.
 let Reported = (
     AlertEvidence
     | where Timestamp > ago(Lookback)
@@ -15,6 +16,7 @@ let Reported = (
     | distinct NetworkMessageId
 );
 
+// Métadonnées des messages sur la période.
 let Mail = materialize(
     EmailEvents
     | where Timestamp > ago(Lookback)
@@ -25,25 +27,44 @@ let Mail = materialize(
               DeliveryAction, DeliveryLocation, LatestDeliveryLocation
 );
 
+// Quarantaines ZAP réussies, par message ET destinataire.
+let ZapQuarantine = (
+    EmailPostDeliveryEvents
+    | where Timestamp > ago(Lookback)
+    | where ActionType in~ ("Phish ZAP", "Malware ZAP")
+    | where ActionResult =~ "Success"
+    | where DeliveryLocation =~ "Quarantine"
+    | distinct NetworkMessageId, RecipientEmailAddress
+    | extend IsZap = true
+);
+
+// Messages de référence suspects.
 let Seeds = materialize(
     Mail
+    | join kind=leftouter ZapQuarantine
+        on NetworkMessageId, RecipientEmailAddress
     | where DeliveryLocation == "Quarantine"
         or NetworkMessageId in (Reported)
-    | extend SeedReason = iff(
-        NetworkMessageId in (Reported),
-        "Signalement utilisateur",
+        or IsZap == true
+    | extend SeedReason = case(
+        IsZap == true, "Quarantaine automatique ZAP",
+        NetworkMessageId in (Reported), "Signalement utilisateur",
         "Quarantaine à la livraison")
     | project SeedId = NetworkMessageId,
               SeedRecipient = RecipientEmailAddress,
-              SeedSubject = Subject, SeedReason
+              SeedSubject = Subject,
+              SeedReason
 );
 
+// Messages initialement livrés à l’utilisateur, y compris en indésirables.
+// Conserve aussi ceux qui ont été remédiés après livraison.
 let Targets = materialize(
     Mail
     | where RecipientEmailAddress =~ Target
     | where DeliveryAction in ("Delivered", "Junked")
 );
 
+// Limite les recherches de PJ et d’URL aux messages utiles.
 let RelevantIds = (
     union
         (Seeds | project NetworkMessageId = SeedId),
@@ -51,7 +72,7 @@ let RelevantIds = (
     | distinct NetworkMessageId
 );
 
-// Une clé par critère de rapprochement.
+// Clés de rapprochement : cluster, objet, nom de PJ et domaine URL.
 let Keys = materialize(
     union
         (
@@ -68,7 +89,8 @@ let Keys = materialize(
             | extend MatchKey = Normalize(Subject)
             | where strlen(MatchKey) >= 8
             | project NetworkMessageId,
-                      MatchType = "Objet normalisé", MatchKey
+                      MatchType = "Objet normalisé",
+                      MatchKey
         ),
         (
             EmailAttachmentInfo
@@ -77,7 +99,8 @@ let Keys = materialize(
             | extend MatchKey = Normalize(FileName)
             | where strlen(MatchKey) >= 8
             | project NetworkMessageId,
-                      MatchType = "Nom PJ normalisé", MatchKey
+                      MatchType = "Nom PJ normalisé",
+                      MatchKey
         ),
         (
             EmailUrlInfo
@@ -86,11 +109,13 @@ let Keys = materialize(
             | extend MatchKey = tolower(UrlDomain)
             | where isnotempty(MatchKey)
             | project NetworkMessageId,
-                      MatchType = "Domaine URL", MatchKey
+                      MatchType = "Domaine URL",
+                      MatchKey
         )
     | distinct NetworkMessageId, MatchType, MatchKey
 );
 
+// Associe les clés aux messages de référence.
 let SeedKeys = (
     Keys
     | join kind=inner Seeds
@@ -99,17 +124,32 @@ let SeedKeys = (
               SeedId, SeedRecipient, SeedSubject, SeedReason
 );
 
+// Compare les messages de l’utilisateur aux messages de référence.
 Targets
 | join kind=inner Keys on NetworkMessageId
 | join kind=inner SeedKeys on MatchType, MatchKey
-// Évite de comparer la même copie à elle-même.
+
+// Évite de comparer une copie du message à elle-même.
 | where NetworkMessageId != SeedId
     or RecipientEmailAddress !~ SeedRecipient
+
 | summarize
     MatchTypes = make_set(MatchType),
-    MatchedValues = make_set(MatchKey)
+    MatchedValues = make_set(
+        strcat(MatchType, " : ", MatchKey)
+    )
     by Timestamp, NetworkMessageId, RecipientEmailAddress,
        Subject, SenderFromAddress, LatestDeliveryLocation,
        SeedId, SeedRecipient, SeedSubject, SeedReason
-| extend MatchingCriteria = array_length(MatchTypes)
-| order by MatchingCriteria desc, Timestamp desc
+
+| extend MatchingCriteria = array_length(MatchTypes),
+         HasClusterMatch = set_has_element(
+             MatchTypes, "Cluster Microsoft"
+         )
+| project Timestamp, Subject, SenderFromAddress,
+          RecipientEmailAddress, LatestDeliveryLocation,
+          HasClusterMatch, MatchingCriteria,
+          MatchTypes, MatchedValues,
+          SeedReason, SeedSubject, SeedRecipient,
+          NetworkMessageId, SeedId
+| order by HasClusterMatch desc, MatchingCriteria desc, Timestamp desc
