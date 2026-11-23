@@ -427,3 +427,22 @@ Le script ajoute de base le ssh sur le port 22 ( à modifier pour plus de sécur
   }
 }
  
+
+
+
+index="TON_INDEX" sourcetype="SOURCETYPE_AGENTS"
+| spath
+| eval nt_host=lower(trim(computerName))
+| eval date_agent=replace(replace(lastActiveDate, "[.][0-9]+", ""), "Z$", "+0000")
+| eval _time=strptime(date_agent, "%Y-%m-%dT%H:%M:%S%z")
+| where isnotnull(nt_host) AND nt_host!="" AND isnotnull(_time)
+| stats max(_time) AS ari_lastdetect
+        latest(osName) AS os
+        latest(osType) AS os_platform
+        latest(machineType) AS asset_class
+        BY nt_host
+| eval lastseen=ari_lastdetect
+| eval asset_type=case(
+    lower(asset_class)="server", "server",
+    in(lower(asset_class), "desktop", "laptop", "workstation"), "workstation"
+  )
