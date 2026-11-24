@@ -446,3 +446,16 @@ index="TON_INDEX" sourcetype="SOURCETYPE_AGENTS"
     lower(asset_class)="server", "server",
     in(lower(asset_class), "desktop", "laptop", "workstation"), "workstation"
   )
+
+
+
+
+
+| tstats fillnull_value="(absent)" count AS evenements
+  FROM datamodel=Risk.All_Risk
+  WHERE All_Risk.risk_object_type="system"
+    AND All_Risk.risk_object IN ("pc1", "PC1", "pc1.domain.local", "PC1.DOMAIN.LOCAL")
+  BY All_Risk.risk_object All_Risk.normalized_risk_object
+| rename All_Risk.risk_object AS nom_emis
+         All_Risk.normalized_risk_object AS nom_normalise
+| table nom_emis nom_normalise evenements
